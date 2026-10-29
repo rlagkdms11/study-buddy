@@ -6,8 +6,8 @@ def stars(n):
     return "★" * int(n or 0)
 
 
-def render_note(note: dict):
-    """AI가 준 정리본 JSON을 PPT 순서대로 화면에 그린다."""
+def render_note(note: dict, page_label=lambda p: f"p.{p}"):
+    """AI가 준 정리본 JSON을 PPT 순서대로 화면에 그린다. page_label은 쪽 번호 표시 방법."""
     st.header(note.get("title", "정리본"))
 
     st.subheader("한 장으로 보는 전체 지도")
@@ -19,7 +19,7 @@ def render_note(note: dict):
 
     for n, sec in enumerate(note.get("sections", []), start=1):
         st.divider()
-        pages = ", ".join(f"p.{p}" for p in sec.get("pages", []))
+        pages = ", ".join(page_label(p) for p in sec.get("pages", []))
         st.subheader(f"{n}. {sec.get('title', '')}  {stars(sec.get('importance'))}")
         st.caption(f"{pages} · {sec.get('link', '')}")
 
@@ -57,11 +57,10 @@ def render_note(note: dict):
             st.table([dict(zip(header, row)) for row in comp.get("rows", [])])
 
 
-def render_quiz(quiz: dict):
+def render_quiz(quiz: dict, page_label=lambda p: f"p.{p}"):
     """퀴즈 JSON을 문제지로 그리고, 채점하기를 누르면 결과를 보여 준다."""
     questions = quiz.get("questions", [])
 
-    # form 안의 선택은 '채점하기'를 누를 때 한꺼번에 반영된다 (보기 하나 고를 때마다 새로고침 안 됨)
     with st.form("quiz_form"):
         for i, q in enumerate(questions, start=1):
             st.markdown(f"**Q{i}.** {q.get('question', '')}")
@@ -71,7 +70,6 @@ def render_quiz(quiz: dict):
 
             if q.get("type") == "choice":
                 options = q.get("options", [])
-                # 선택값은 보기 번호(1~4), 화면에는 "1. 보기 내용"으로 보여 준다
                 st.radio(f"Q{i} 보기", list(range(1, len(options) + 1)), index=None,
                          format_func=lambda n, opts=options: f"{n}. {opts[n - 1]}",
                          key=f"q_{i}", label_visibility="collapsed")
@@ -90,7 +88,7 @@ def render_quiz(quiz: dict):
     correct, total = 0, 0
     for i, q in enumerate(questions, start=1):
         mine = st.session_state.get(f"q_{i}")
-        pages = ", ".join(f"p.{p}" for p in q.get("pages", []))
+        pages = ", ".join(page_label(p) for p in q.get("pages", []))
 
         if q.get("type") == "choice":
             total += 1
