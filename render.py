@@ -55,3 +55,58 @@ def render_note(note: dict):
             st.markdown(f"**{comp.get('title', '')}**")
             header = comp.get("header", [])
             st.table([dict(zip(header, row)) for row in comp.get("rows", [])])
+
+
+def render_quiz(quiz: dict):
+    """퀴즈 JSON을 문제지로 그리고, 채점하기를 누르면 결과를 보여 준다."""
+    questions = quiz.get("questions", [])
+
+    # form 안의 선택은 '채점하기'를 누를 때 한꺼번에 반영된다 (보기 하나 고를 때마다 새로고침 안 됨)
+    with st.form("quiz_form"):
+        for i, q in enumerate(questions, start=1):
+            st.markdown(f"**Q{i}.** {q.get('question', '')}")
+            if q.get("code"):
+                st.code(q["code"], language=q.get("code_language", "java"))
+            st.caption(f"{q.get('section', '')} {stars(q.get('importance'))}")
+
+            if q.get("type") == "choice":
+                options = q.get("options", [])
+                # 선택값은 보기 번호(1~4), 화면에는 "1. 보기 내용"으로 보여 준다
+                st.radio(f"Q{i} 보기", list(range(1, len(options) + 1)), index=None,
+                         format_func=lambda n, opts=options: f"{n}. {opts[n - 1]}",
+                         key=f"q_{i}", label_visibility="collapsed")
+            else:
+                st.text_input(f"Q{i} 답", key=f"q_{i}",
+                              label_visibility="collapsed", placeholder="답을 적어 보세요")
+        submitted = st.form_submit_button("채점하기")
+
+    if submitted:
+        st.session_state["quiz_submitted"] = True
+    if not st.session_state.get("quiz_submitted"):
+        return
+
+    st.divider()
+    st.subheader("채점 결과")
+    correct, total = 0, 0
+    for i, q in enumerate(questions, start=1):
+        mine = st.session_state.get(f"q_{i}")
+        pages = ", ".join(f"p.{p}" for p in q.get("pages", []))
+
+        if q.get("type") == "choice":
+            total += 1
+            options = q.get("options", [])
+            answer = q.get("answer_index", 0)
+            answer_text = options[answer - 1] if 1 <= answer <= len(options) else q.get("answer_text", "")
+            mine_text = f"{mine}번" if mine else "선택 안 함"
+            if mine == answer:
+                correct += 1
+                st.success(f"Q{i} 정답! {answer}번")
+            else:
+                st.error(f"Q{i} 오답. 내 답: {mine_text} / 정답: {answer}번")
+            st.caption(f"정답 {answer}번: {answer_text}")
+        else:
+            st.info(f"Q{i} 단답형. 내 답: {mine or '(입력 안 함)'} / 정답: {q.get('answer_text', '')}")
+        st.caption(f"해설: {q.get('explanation', '')} ({pages})")
+
+    if total:
+        st.metric("객관식 점수", f"{correct} / {total}")
