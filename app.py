@@ -1,4 +1,6 @@
+import re
 import time
+from datetime import date, timedelta
 
 import streamlit as st
 import pymupdf
@@ -9,12 +11,19 @@ from render import render_note, render_quiz
 
 st.title("study-buddy")
 
-pdf = st.file_uploader("강의 PDF를 올려 주세요", type="pdf")
+# ▼ 여러 파일 업로드
+pdfs = st.file_uploader("강의 PDF를 올려 주세요 (여러 개 가능)", type="pdf", accept_multiple_files=True)
 
 
-def extract_pages(file):
-    """PDF를 페이지별 텍스트 목록으로 바꾼다. 글 상자 단위로 위치 순서 정렬."""
-    doc = pymupdf.open(stream=file.getvalue(), filetype="pdf")
+def natural_key(name):
+    """'2강'이 '10강'보다 앞에 오도록 이름 속 숫자를 숫자로 비교한다."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+@st.cache_data(show_spinner=False)
+def extract_pages(data: bytes):
+    """PDF를 페이지별 텍스트 목록으로 바꾼다. 같은 파일은 다시 읽지 않는다."""
+    doc = pymupdf.open(stream=data, filetype="pdf")
     pages = []
     for page in doc:
         blocks = page.get_text("blocks", sort=True)
@@ -24,18 +33,45 @@ def extract_pages(file):
     return pages
 
 
-def build_pdf_text(pages):
-    """AI가 쪽 번호를 알 수 있게 페이지마다 [n쪽] 표시를 붙인다."""
-    return "\n\n".join(f"[{i}쪽]\n{text}" for i, text in enumerate(pages, start=1))
+def load_all(files):
+    """여러 PDF를 강의 순서대로 정렬해 페이지를 한 줄로 이어 붙인다."""
+    files = sorted(files, key=lambda f: natural_key(f.name))
+    items = []
+    for f in files:
+        title = f.name.removesuffix(".pdf")
+        for i, text in enumerate(extract_pages(f.getvalue()), start=1):
+            items.append({"file": title, "page": i, "text": text})
+    return files, items
+
+
+def build_pdf_text(items, first=1):
+    """페이지마다 [전체 n쪽] 표시를 붙이고, 파일이 바뀔 때 강의 이름을 적는다."""
+    lines, current = [], None
+    for n, it in enumerate(items, start=first):
+        if it["file"] != current:
+            lines.append(f"===== 강의 자료: {it['file']} =====")
+            current = it["file"]
+        lines.append(f"[{n}쪽]\n{it['text']}")
+    return "\n\n".join(lines)
+
+
+def describe_range(items, start, end):
+    """전체 start~end쪽을 '1강 8~10쪽, 2강 1~5쪽'처럼 파일별로 설명한다."""
+    parts = []
+    for it in items[start - 1:end]:
+        if parts and parts[-1][0] == it["file"]:
+            parts[-1][2] = it["page"]
+        else:
+            parts.append([it["file"], it["page"], it["page"]])
+    return ", ".join(f"{f} {a}\\~{b}쪽" if a != b else f"{f} {a}쪽" for f, a, b in parts)
 
 
 @st.cache_data(show_spinner=False)
 def make_note(pdf_text: str):
-    """같은 PDF 내용이면 AI를 다시 부르지 않고 저장된 결과를 돌려준다."""
+    """같은 내용이면 AI를 다시 부르지 않고 저장된 결과를 돌려준다."""
     return ask_ai(SUMMARY_PROMPT + pdf_text, as_json=True)
 
 
-# ▼ 추가: 퀴즈 생성 함수
 @st.cache_data(show_spinner=False)
 def make_quiz(pdf_text: str, sections: tuple):
     """퀴즈를 만든다. 정리본이 있으면 같은 섹션 이름을 쓰게 해서 둘을 연결한다."""
@@ -45,19 +81,84 @@ def make_quiz(pdf_text: str, sections: tuple):
     return ask_ai(QUIZ_PROMPT + hint + "\n강의 PDF 내용:\n" + pdf_text, as_json=True)
 
 
-if pdf:
-    pages = extract_pages(pdf)
+def make_plan(total_pages, start_date, exam_date):
+    """공부 시작일부터 시험 전날까지 페이지를 하루씩 고르게 나눈다."""
+    days = min((exam_date - start_date).days, total_pages)
+    if days <= 0:
+        return []
+    base, extra = divmod(total_pages, days)
+    plan, page = [], 1
+    for d in range(days):
+        count = base + (1 if d < extra else 0)
+        plan.append({"day": d + 1, "date": start_date + timedelta(days=d),
+                     "start": page, "end": page + count - 1})
+        page += count
+    return plan
 
-    with st.expander(f"추출한 텍스트 보기 (총 {len(pages)}쪽)"):
-        for i, text in enumerate(pages, start=1):
-            st.markdown(f"**{i}쪽**")
-            st.text(text or "(글자 없음)")
+
+def reset_results():
+    """공부 범위가 바뀌면 이전 범위의 정리본·퀴즈·답을 지운다."""
+    for key in ["note", "elapsed", "quiz", "quiz_elapsed", "quiz_submitted"]:
+        st.session_state.pop(key, None)
+    for key in [k for k in st.session_state if str(k).startswith(("q_", "order_"))]:
+        del st.session_state[key]
+
+
+if pdfs:
+    files, items = load_all(pdfs)
+    st.caption(f"자료 {len(files)}개 · 총 {len(items)}쪽 · 순서: " + " → ".join(f.name for f in files))
+
+    # 화면에 보여 줄 쪽 번호: 전체 번호 → '2강 p.3' (파일이 하나면 'p.3')
+    def page_label(n):
+        if not 1 <= n <= len(items):
+            return f"p.{n}"
+        it = items[n - 1]
+        return f"p.{it['page']}" if len(files) == 1 else f"{it['file']} p.{it['page']}"
+
+    with st.expander("추출한 텍스트 보기"):
+        for n, it in enumerate(items, start=1):
+            st.markdown(f"**{it['file']} {it['page']}쪽**")
+            st.text(it["text"] or "(글자 없음)")
+
+    # 학습 계획
+    st.subheader("📅 학습 계획")
+    left, right = st.columns(2)
+    start_date = left.date_input("공부 시작일", value=date.today())
+    exam_date = right.date_input("시험일", value=date.today() + timedelta(days=7))
+
+    plan = make_plan(len(items), start_date, exam_date)
+    if not plan:
+        st.warning("시험일은 공부 시작일보다 뒤로 골라 주세요.")
+        st.stop()
+
+    st.table([{"날짜": f"Day {p['day']} ({p['date']:%m/%d})",
+               "범위": describe_range(items, p["start"], p["end"])} for p in plan])
+
+    today_idx = next((i for i, p in enumerate(plan) if p["date"] == date.today()), 0)
+    idx = st.selectbox(
+        "공부할 날", range(len(plan)), index=today_idx,
+        format_func=lambda i: f"Day {plan[i]['day']} ({plan[i]['date']:%m/%d})",
+    )
+    chosen = plan[idx]
+    count = chosen["end"] - chosen["start"] + 1
+    st.success(f"오늘 범위: {describe_range(items, chosen['start'], chosen['end'])} ({count}쪽)")
+
+    range_id = "|".join(f"{f.name}{f.size}" for f in files) + f"-{chosen['start']}-{chosen['end']}"
+    if st.session_state.get("range_id") != range_id:
+        reset_results()
+        st.session_state["range_id"] = range_id
+
+    # 오늘 범위만 AI에 보낸다
+    today_items = items[chosen["start"] - 1:chosen["end"]]
+    pdf_text = build_pdf_text(today_items, first=chosen["start"])
+
+    st.divider()
 
     if st.button("정리본 만들기"):
         try:
             start = time.perf_counter()
-            with st.spinner(f"{len(pages)}쪽 정리본을 만드는 중... 페이지가 많으면 몇 분 걸릴 수 있어요"):
-                st.session_state["note"] = make_note(build_pdf_text(pages))
+            with st.spinner(f"{count}쪽 정리본을 만드는 중... 보통 1~2분 걸려요"):
+                st.session_state["note"] = make_note(pdf_text)
             st.session_state["elapsed"] = time.perf_counter() - start
         except Exception as e:
             st.error(f"정리본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
@@ -65,11 +166,10 @@ if pdf:
     if "note" in st.session_state:
         if "elapsed" in st.session_state:
             st.caption(f"정리본 생성: {st.session_state['elapsed']:.0f}초")
-        render_note(st.session_state["note"])
+        render_note(st.session_state["note"], page_label=page_label)
         with st.expander("AI가 보낸 원본 JSON 보기"):
             st.json(st.session_state["note"])
 
-    # ▼ 추가: 퀴즈 영역
     st.divider()
     st.header("복습 퀴즈")
 
@@ -78,8 +178,7 @@ if pdf:
             start = time.perf_counter()
             sections = tuple(st.session_state.get("note", {}).get("map", []))
             with st.spinner("퀴즈를 만드는 중..."):
-                quiz = make_quiz(build_pdf_text(pages), sections)
-            # 이전 퀴즈에서 고른 답을 지워서 새 퀴즈와 섞이지 않게 한다
+                quiz = make_quiz(pdf_text, sections)
             for key in [k for k in st.session_state if str(k).startswith("q_")]:
                 del st.session_state[key]
             st.session_state["quiz"] = quiz
@@ -90,6 +189,6 @@ if pdf:
 
     if "quiz" in st.session_state:
         st.caption(f"퀴즈 생성: {st.session_state.get('quiz_elapsed', 0):.0f}초")
-        render_quiz(st.session_state["quiz"])
+        render_quiz(st.session_state["quiz"], page_label=page_label)
         with st.expander("AI가 보낸 퀴즈 원본 JSON 보기"):
             st.json(st.session_state["quiz"])
