@@ -4,8 +4,8 @@ import streamlit as st
 import pymupdf
 
 from ai import ask_ai
-from prompts import SUMMARY_PROMPT
-from render import render_note
+from prompts import SUMMARY_PROMPT, QUIZ_PROMPT
+from render import render_note, render_quiz
 
 st.title("study-buddy")
 
@@ -35,6 +35,16 @@ def make_note(pdf_text: str):
     return ask_ai(SUMMARY_PROMPT + pdf_text, as_json=True)
 
 
+# ▼ 추가: 퀴즈 생성 함수
+@st.cache_data(show_spinner=False)
+def make_quiz(pdf_text: str, sections: tuple):
+    """퀴즈를 만든다. 정리본이 있으면 같은 섹션 이름을 쓰게 해서 둘을 연결한다."""
+    hint = ""
+    if sections:
+        hint = "\nsection 칸에는 다음 섹션 제목 중 하나를 그대로 써: " + ", ".join(sections) + "\n"
+    return ask_ai(QUIZ_PROMPT + hint + "\n강의 PDF 내용:\n" + pdf_text, as_json=True)
+
+
 if pdf:
     pages = extract_pages(pdf)
 
@@ -58,3 +68,28 @@ if pdf:
         render_note(st.session_state["note"])
         with st.expander("AI가 보낸 원본 JSON 보기"):
             st.json(st.session_state["note"])
+
+    # ▼ 추가: 퀴즈 영역
+    st.divider()
+    st.header("복습 퀴즈")
+
+    if st.button("퀴즈 만들기"):
+        try:
+            start = time.perf_counter()
+            sections = tuple(st.session_state.get("note", {}).get("map", []))
+            with st.spinner("퀴즈를 만드는 중..."):
+                quiz = make_quiz(build_pdf_text(pages), sections)
+            # 이전 퀴즈에서 고른 답을 지워서 새 퀴즈와 섞이지 않게 한다
+            for key in [k for k in st.session_state if str(k).startswith("q_")]:
+                del st.session_state[key]
+            st.session_state["quiz"] = quiz
+            st.session_state["quiz_submitted"] = False
+            st.session_state["quiz_elapsed"] = time.perf_counter() - start
+        except Exception as e:
+            st.error(f"퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
+
+    if "quiz" in st.session_state:
+        st.caption(f"퀴즈 생성: {st.session_state.get('quiz_elapsed', 0):.0f}초")
+        render_quiz(st.session_state["quiz"])
+        with st.expander("AI가 보낸 퀴즈 원본 JSON 보기"):
+            st.json(st.session_state["quiz"])
