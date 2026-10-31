@@ -110,15 +110,86 @@ def apply_fixes(quiz: dict, fixes: list[dict]) -> int:
     return n
 
 
-def check_and_fix(quiz: dict, source: str, ask) -> dict:
-    """검사 → 근거 약한 보기만 한 번 다시 만들기 → 다시 검사. ask는 (prompt) -> dict."""
-    before = find_weak(quiz, source)
-    report = {"weak_before": len(before), "fixed": 0, "weak_after": len(before)}
-    if before:
+def concept_terms(quiz: dict) -> list[str]:
+    return [str(c.get("term", "")).strip() for c in quiz.get("concepts", []) if str(c.get("term", "")).strip()]
+
+
+def rewrite_prompt(quiz: dict, qis: list[int]) -> str:
+    """보기를 고쳐도 엉뚱하면, 문제를 '설명 보고 개념 고르기'로 통째로 바꾸게 한다."""
+    terms = concept_terms(quiz)
+    lines = [f'- 문제 {qi + 1}: {quiz["questions"][qi].get("question")} (정답: {quiz["questions"][qi].get("answer_text")})' for qi in qis]
+    return f"""너는 대학생 시험 퀴즈를 검토하는 조교야.
+아래 문제들은 오답 보기가 강의에 없는 내용이라 소거법으로 풀려. 각 문제를 "설명을 보고 개념 고르기" 문제로 다시 만들어 줘.
+
+규칙
+- question: 이 문제가 묻던 내용을 강의 범위 근거로 설명하는 한두 문장 + "이 설명에 해당하는 것은?"
+- options: 아래 개념 목록에서 정확히 같은 글자로 4개만 골라. 정답 1개 + 헷갈리기 쉬운 개념 3개.
+- 개념 목록: {" | ".join(terms)}
+- answer_index는 정답 보기 번호(1~4), answer_text는 정답 보기 글자 그대로.
+- explanation은 정답인 이유와 가장 헷갈리는 오답이 틀린 이유를 한두 문장으로.
+- 한국어로 쓰고 마크다운 기호는 쓰지 마.
+
+다시 만들 문제
+{chr(10).join(lines)}
+
+아래 JSON 형식으로만 답해. q는 위에 적힌 문제 번호 그대로.
+{{"rewrites": [{{"q": 1, "question": "설명... 이 설명에 해당하는 것은?", "options": ["개념", "개념", "개념", "개념"], "answer_index": 2, "answer_text": "개념", "explanation": "해설"}}]}}
+"""
+
+
+def apply_rewrites(quiz: dict, rewrites: list[dict], qis: list[int]) -> int:
+    """보기 4개가 모두 개념 목록에 있을 때만 바꿔 끼운다. 코드로 확인하니 엉뚱한 보기가 들어올 수 없다."""
+    terms = {compact(t): t for t in concept_terms(quiz)}
+    n = 0
+    for r in rewrites or []:
         try:
-            res = ask(fix_prompt(quiz, before))
-            report["fixed"] = apply_fixes(quiz, res.get("fixes", []))
+            qi = int(r["q"]) - 1
+            opts = [str(o).strip() for o in r["options"]]
+            ai = int(r["answer_index"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if qi not in qis or len(opts) != 4 or len({compact(o) for o in opts}) != 4 or not 1 <= ai <= 4:
+            continue
+        if not all(compact(o) in terms for o in opts):
+            continue
+        q = quiz["questions"][qi]
+        q.update({
+            "question": str(r.get("question", q.get("question"))),
+            "options": [terms[compact(o)] for o in opts],
+            "option_sources": ["정답" if i + 1 == ai else f"가: {o}" for i, o in enumerate(opts)],
+            "answer_index": ai,
+            "answer_text": terms[compact(opts[ai - 1])],
+            "explanation": str(r.get("explanation", q.get("explanation", ""))),
+            "code": "",
+        })
+        n += 1
+    return n
+
+
+def check_and_fix(quiz: dict, source: str, ask) -> dict:
+    """1단계: 근거 약한 보기만 다시 만들기
+    2단계: 그래도 남으면 그 문제를 '개념 고르기' 문제로 바꾸기 (보기는 개념 목록에서만, 코드로 확인)
+    3단계: 그래도 남으면 그 문제는 뺀다
+    ask는 (prompt) -> dict. 단계가 실패해도 원래 퀴즈는 쓸 수 있게 둔다."""
+    weak = find_weak(quiz, source)
+    report = {"weak_before": len(weak), "fixed": 0, "rewritten": 0, "dropped": 0, "weak_after": len(weak)}
+    if not weak:
+        return report
+    try:
+        res = ask(fix_prompt(quiz, weak))
+        report["fixed"] = apply_fixes(quiz, res.get("fixes", []))
+    except Exception:
+        pass
+    left = sorted({w["q"] for w in find_weak(quiz, source)})
+    if left and len(concept_terms(quiz)) >= 4:
+        try:
+            res = ask(rewrite_prompt(quiz, left))
+            report["rewritten"] = apply_rewrites(quiz, res.get("rewrites", []), left)
         except Exception:
-            pass  # 고치기에 실패해도 원래 퀴즈는 그대로 쓴다
-        report["weak_after"] = len(find_weak(quiz, source))
+            pass
+    left = sorted({w["q"] for w in find_weak(quiz, source)})
+    if left:
+        quiz["questions"] = [q for i, q in enumerate(quiz.get("questions", [])) if i not in left]
+        report["dropped"] = len(left)
+    report["weak_after"] = len(find_weak(quiz, source))
     return report

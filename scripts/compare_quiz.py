@@ -109,7 +109,7 @@ def main():
                 fixed_name = name.replace(".json", "-fixed.json")
                 (out_dir / fixed_name).write_text(json.dumps(quiz, ensure_ascii=False, indent=2), encoding="utf-8")
                 rows.append(("새+자동검사", model, sec + sec2, total2, len(weak2), fixed_name))
-                print(f"  {sec2:.0f}초 더 · 고친 보기 {check['fixed']}개 · 남은 근거 약한 보기 {len(weak2)}개")
+                print(f"  {sec2:.0f}초 더 · 보기 고침 {check['fixed']} · 문제 바꿈 {check['rewritten']} · 뺌 {check['dropped']} · 남은 문제 {len(quiz['questions'])}개 · 남은 근거 약한 보기 {len(weak2)}개")
                 for n, k, g, opt in weak2:
                     print(f"    Q{n} 보기{k} (근거 {g:.0%}): {opt}")
             print()

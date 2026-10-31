@@ -134,7 +134,7 @@ def quiz(req: QuizRequest):
     source = " ".join(p.text for p in req.pages)
     check = check_and_fix(result, source, lambda prompt: ask_ai(prompt, as_json=True))
     check["seconds"] = round(time.perf_counter() - start, 1)
-    print(f"[퀴즈 검사] 근거 약한 보기 {check['weak_before']}개 → 고침 {check['fixed']}개 → 남음 {check['weak_after']}개 ({check['seconds']}초)")
+    print(f"[퀴즈 검사] 근거 약한 보기 {check['weak_before']}개 → 보기 고침 {check['fixed']} · 문제 바꿈 {check['rewritten']} · 뺌 {check['dropped']} → 남음 {check['weak_after']}개 ({check['seconds']}초)")
     return {"quiz": result, "elapsed": round(elapsed + check["seconds"], 1), "check": check}
 
 
