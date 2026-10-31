@@ -510,11 +510,15 @@ function renderQuiz(day) {
       <h2>${esc(q.question)}</h2>
       ${q.code ? `<pre class="code">${esc(q.code)}</pre>` : ""}
       ${optionHTML(q, i)}
-      ${graded && q.explanation ? `<p class="explain">${esc(q.explanation)}</p>` : ""}
-      ${graded ? `<div class="q-links">
-        <a href="${sectionLink(q)}">정리본에서 다시 보기</a>
-        <button type="button" class="link" data-flag="${i}" data-kind="confused">${flags[i] === "confused" ? "✓ 이해 안 돼요 표시함" : "이해 안 돼요"}</button>
-        <button type="button" class="link muted" data-flag="${i}" data-kind="wrong">${flags[i] === "wrong" ? "✓ 정답 오류 신고함" : "정답이 이상해요"}</button>
+      ${graded ? `<div class="explain-box">
+        ${q.explanation ? `<span class="explain-label">해설</span><p class="explain">${esc(q.explanation)}</p>` : ""}
+        <div class="explain-foot">
+          <a class="see-note" href="${sectionLink(q)}">정리본${pageRange(q.pages, multi) ? ` ${esc(pageRange(q.pages, multi))}` : ""}에서 다시 보기 →</a>
+          <span class="chips-right">
+            <button type="button" class="chip ${flags[i] === "confused" ? "on" : ""}" data-flag="${i}" data-kind="confused" aria-pressed="${flags[i] === "confused"}">${flags[i] === "confused" ? "✓ " : ""}이해 안 돼요</button>
+            <button type="button" class="chip ${flags[i] === "wrong" ? "on" : ""}" data-flag="${i}" data-kind="wrong" aria-pressed="${flags[i] === "wrong"}">${flags[i] === "wrong" ? "✓ 신고함" : "정답이 이상해요"}</button>
+          </span>
+        </div>
       </div>` : ""}
     </article>`;
   };

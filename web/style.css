@@ -132,9 +132,16 @@ label.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-o
 .short-result { margin: 0; font-size: 15px; }
 b.ok { color: var(--ok); } b.bad { color: var(--bad); }
 .code { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; background: #f5f6f8; border-radius: 10px; padding: 14px 16px; white-space: pre-wrap; overflow-x: auto; }
-.explain { margin: 0; font-size: 14px; line-height: 1.7; color: #3d434b; }
-.q-links { display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; }
-.q-links .link { font-size: 14px; }
+.explain-box { background: #f6f7f9; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+.explain-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .02em; }
+.explain { margin: 0; font-size: 15px; line-height: 1.7; color: #2b3038; }
+.explain-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; padding-top: 12px; border-top: 1px solid #e6e8ec; }
+.see-note { font-size: 14px; font-weight: 500; }
+.chips-right { margin-left: auto; display: flex; gap: 6px; }
+.chip { font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid #d9dde3; background: #fff; color: var(--muted); cursor: pointer; }
+.chip:hover { border-color: #b9c0ca; color: var(--text); }
+.chip.on { background: #fff4e5; border-color: #f0c88a; color: #9a5b00; }
+@media (max-width: 520px) { .chips-right { margin-left: 0; } }
 .actions.ruled { border-top: 1px solid var(--line); padding-top: 28px; }
 
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
