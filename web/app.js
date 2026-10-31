@@ -345,7 +345,7 @@ function pageRange(nums, multi) {
 const stars = (n) => "★".repeat(Math.max(0, Math.min(3, +n || 0)));
 const arr = (x) => (Array.isArray(x) ? x : []);
 
-function renderNote(day) {
+function renderNote(day, jump) {
   if (!store.plan) return redirect("#/upload");
   const d = store.plan.find((p) => String(p.day) === String(day));
   if (!d) return redirect("#/today");
@@ -425,11 +425,208 @@ function renderNote(day) {
     e.preventDefault();
     document.getElementById(a.dataset.jump).scrollIntoView({ behavior: "smooth" });
   }));
+  if (jump && document.getElementById(jump)) {
+    const target = document.getElementById(jump);
+    requestAnimationFrame(() => target.scrollIntoView());
+    target.style.outline = "3px solid #fff08a";
+    setTimeout(() => (target.style.outline = ""), 2000);
+  }
   app.querySelectorAll("[data-check]").forEach((b) => b.addEventListener("click", () => {
     const box = document.getElementById("c" + b.dataset.check);
     box.hidden = !box.hidden;
     b.setAttribute("aria-expanded", String(!box.hidden));
     b.textContent = box.hidden ? "확인 질문 보기" : "확인 질문 접기";
+  }));
+}
+
+// ---------- ⑥ 퀴즈 ----------
+// 단답형 채점: 띄어쓰기·대소문자·기호를 무시하고 비교한다
+function normalize(t) {
+  return String(t ?? "").toLowerCase().replace(/[\s.,()[\]"'`·:;!?\-_/{}<>]/g, "");
+}
+function isCorrect(q, answer) {
+  if (answer === undefined || answer === null || answer === "") return false;
+  if (q.type === "short") {
+    const a = normalize(answer), b = normalize(q.answer_text);
+    return !!a && (a === b || (a.length >= 2 && b.includes(a) && a.length >= b.length / 2));
+  }
+  return +answer === +q.answer_index;
+}
+
+function renderQuiz(day) {
+  if (!store.plan) return redirect("#/upload");
+  const d = store.plan.find((p) => String(p.day) === String(day));
+  if (!d) return redirect("#/today");
+  const rec = dayRecord(d.day);
+  const qs = arr(rec.quiz && rec.quiz.questions);
+  const multi = new Set(store.pages.slice(d.start - 1, d.end).map((p) => p.file)).size > 1;
+  const sectionTitles = arr(rec.note && rec.note.sections).map((s) => s.title);
+
+  if (!qs.length) {
+    app.innerHTML = `${navHeader("")}
+    <main><div class="head"><span class="meta">Day ${d.day} · ${esc(d.label)}</span><h1 class="title">퀴즈를 아직 만들지 않았어요</h1>
+    <span class="hint">오늘 화면을 열면 정리본 다음에 자동으로 만들어요.</span></div>
+    <div class="actions"><a class="primary" href="#/today">오늘로 가서 만들기</a></div></main>`;
+    return;
+  }
+
+  const answers = rec.answers || {};
+  const graded = !!rec.graded;
+  const only = Array.isArray(rec.only) ? rec.only : null;   // 틀린 문제 다시 풀기일 때 그 번호만
+  const shown = qs.map((q, i) => i).filter((i) => !only || only.includes(i));
+  const flags = rec.flags || {};
+  const overrides = rec.overrides || {};                  // 단답형을 "맞은 걸로" 바꾼 번호
+  const right = (i) => overrides[i] || isCorrect(qs[i], answers[i]);
+  const score = shown.filter(right).length;
+
+  const optionHTML = (q, i) => {
+    if (q.type === "short") {
+      if (!graded) return `<input class="short" data-i="${i}" value="${esc(answers[i] || "")}" placeholder="답을 적어 주세요" aria-label="Q${i + 1} 답">`;
+      return `<p class="short-result">내 답 <b class="${right(i) ? "ok" : "bad"}">${esc(answers[i] || "(안 씀)")}</b> · 정답 <b>${esc(q.answer_text)}</b>
+        ${!right(i) && answers[i] ? `<button type="button" class="link muted" data-override="${i}" style="font-size:13px;margin-left:8px">맞은 걸로 할게요</button>` : ""}</p>`;
+    }
+    return `<ol class="opts" role="radiogroup" aria-label="Q${i + 1} 보기">${arr(q.options).map((o, k) => {
+      const n = k + 1;
+      const mine = +answers[i] === n, correct = +q.answer_index === n;
+      if (!graded) {
+        return `<li><label class="opt ${mine ? "picked" : ""}"><input type="radio" name="q${i}" value="${n}" ${mine ? "checked" : ""} data-i="${i}"><span class="n">${n}</span><span>${esc(o)}</span></label></li>`;
+      }
+      const cls = correct ? "ok" : mine ? "bad" : "";
+      const tag = correct ? "정답" : mine ? "내 답" : "";
+      return `<li class="opt done ${cls}"><span class="n">${n}</span><span class="grow">${esc(o)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}</li>`;
+    }).join("")}</ol>`;
+  };
+
+  const sectionLink = (q) => {
+    const k = sectionTitles.indexOf(q.section);
+    return k >= 0 ? `#/note/${d.day}/s${k}` : `#/note/${d.day}`;
+  };
+
+  const questionHTML = (i, no) => {
+    const q = qs[i];
+    const where = [q.section, pageRange(q.pages, multi)].filter(Boolean).map(esc).join(" · ");
+    return `<article class="q ${graded ? (right(i) ? "is-ok" : "is-bad") : ""}" id="q${i}">
+      <span class="meta">Q${no}${where ? ` · ${where}` : ""}${graded ? ` · <b class="${right(i) ? "ok" : "bad"}">${right(i) ? "맞음" : "틀림"}</b>` : ""}</span>
+      <h2>${esc(q.question)}</h2>
+      ${q.code ? `<pre class="code">${esc(q.code)}</pre>` : ""}
+      ${optionHTML(q, i)}
+      ${graded && q.explanation ? `<p class="explain">${esc(q.explanation)}</p>` : ""}
+      ${graded ? `<div class="q-links">
+        <a href="${sectionLink(q)}">정리본에서 다시 보기</a>
+        <button type="button" class="link" data-flag="${i}" data-kind="confused">${flags[i] === "confused" ? "✓ 이해 안 돼요 표시함" : "이해 안 돼요"}</button>
+        <button type="button" class="link muted" data-flag="${i}" data-kind="wrong">${flags[i] === "wrong" ? "✓ 정답 오류 신고함" : "정답이 이상해요"}</button>
+      </div>` : ""}
+    </article>`;
+  };
+
+  const wrongCount = shown.length - score;
+  app.innerHTML = `
+  <header><div class="bar split"><a href="#/today" style="font-size:14px">← 오늘로</a><a href="#/note/${d.day}" style="font-size:14px">정리본</a></div></header>
+  <main>
+    <div class="head" style="gap:6px">
+      <span class="meta">Day ${d.day} · ${esc(d.label)}${only ? " · 틀린 문제 다시 풀기" : ""}</span>
+      ${graded
+        ? `<h1 class="title">${shown.length}문제 중 ${score}개 맞았어요</h1>
+           <span class="hint">${wrongCount ? `틀린 ${wrongCount}문제는 지난 공부와 복습 날에 다시 나와요` : "다 맞았어요! 🎉"}</span>`
+        : `<h1 class="title">${only ? `틀린 ${shown.length}문제 다시 풀기` : `퀴즈 ${shown.length}문제`}</h1>
+           <span class="hint" id="left"></span>`}
+    </div>
+    ${shown.map((i, n) => questionHTML(i, n + 1)).join("")}
+    <div class="actions ruled">
+      ${graded
+        ? `${wrongCount ? `<button class="primary" id="retry">틀린 문제 다시 풀기</button>` : `<a class="primary" href="#/today">오늘로 돌아가기</a>`}
+           <button class="link" id="fresh">새 퀴즈 만들기</button>`
+        : `<button class="primary" id="grade">채점하기</button>`}
+      <span id="qmsg" class="status" aria-live="polite"></span>
+    </div>
+  </main>`;
+
+  // 푸는 중: 고를 때마다 저장
+  const saveAnswer = (i, v) => {
+    const cur = dayRecord(d.day).answers || {};
+    updateDay(d.day, { answers: { ...cur, [i]: v } });
+    store = load();
+    countLeft();
+  };
+  const countLeft = () => {
+    const el = document.getElementById("left");
+    if (!el) return;
+    const a = dayRecord(d.day).answers || {};
+    const left = shown.filter((i) => a[i] === undefined || a[i] === "").length;
+    el.textContent = left ? `${left}문제 남았어요 · 고른 답은 바로 저장돼요` : "다 풀었어요. 채점해 볼까요?";
+  };
+  countLeft();
+  app.querySelectorAll('input[type="radio"][data-i]').forEach((r) => r.addEventListener("change", () => {
+    r.closest(".opts").querySelectorAll(".opt").forEach((l) => l.classList.remove("picked"));
+    r.closest(".opt").classList.add("picked");
+    saveAnswer(r.dataset.i, +r.value);
+  }));
+  app.querySelectorAll("input.short").forEach((t) => t.addEventListener("input", () => saveAnswer(t.dataset.i, t.value.trim())));
+
+  const grade = document.getElementById("grade");
+  if (grade) grade.addEventListener("click", () => {
+    const a = dayRecord(d.day).answers || {};
+    const left = shown.filter((i) => a[i] === undefined || a[i] === "").length;
+    if (left) {
+      const msg = document.getElementById("qmsg");
+      if (grade.dataset.sure !== "1") {
+        msg.textContent = `아직 ${left}문제를 안 풀었어요. 그대로 채점하려면 한 번 더 눌러 주세요.`;
+        grade.dataset.sure = "1";
+        return;
+      }
+    }
+    const ov = dayRecord(d.day).overrides || {};
+    const wrong = qs.map((q, i) => i).filter((i) => !(ov[i] || isCorrect(qs[i], a[i])));
+    updateDay(d.day, { graded: true, wrong, quizDone: true, score: qs.length - wrong.length, gradedAt: ymd(new Date()) });
+    renderQuiz(d.day);
+    window.scrollTo(0, 0);
+  });
+
+  const retry = document.getElementById("retry");
+  if (retry) retry.addEventListener("click", () => {
+    const r = dayRecord(d.day);
+    const again = shown.filter((i) => !right(i));
+    const a = { ...(r.answers || {}) };
+    again.forEach((i) => delete a[i]);
+    updateDay(d.day, { graded: false, only: again, answers: a });
+    renderQuiz(d.day);
+    window.scrollTo(0, 0);
+  });
+
+  const fresh = document.getElementById("fresh");
+  if (fresh) fresh.addEventListener("click", async () => {
+    const msg = document.getElementById("qmsg");
+    fresh.disabled = true;
+    msg.innerHTML = `<span class="dot busy"></span>새 퀴즈를 만드는 중이에요`;
+    try {
+      const res = await postJSON("/api/quiz", { pages: store.pages.slice(d.start - 1, d.end), first: d.start, sections: (rec.note && rec.note.map) || [] });
+      const old = dayRecord(d.day);
+      updateDay(d.day, { quiz: res.quiz, quizSeconds: res.elapsed, answers: {}, graded: false, only: null, overrides: {}, flags: {},
+        pastQuizzes: [...arr(old.pastQuizzes), { quiz: old.quiz, answers: old.answers, wrong: old.wrong }] });
+      renderQuiz(d.day);
+      window.scrollTo(0, 0);
+    } catch (e) {
+      msg.innerHTML = `<span class="dot bad"></span>${esc(e.message)}`;
+      fresh.disabled = false;
+    }
+  });
+
+  app.querySelectorAll("[data-override]").forEach((b) => b.addEventListener("click", () => {
+    const r = dayRecord(d.day);
+    const ov = { ...(r.overrides || {}), [b.dataset.override]: true };
+    const wrong = arr(r.wrong).filter((i) => String(i) !== b.dataset.override);
+    updateDay(d.day, { overrides: ov, wrong, score: qs.length - wrong.length });
+    renderQuiz(d.day);
+  }));
+
+  app.querySelectorAll("[data-flag]").forEach((b) => b.addEventListener("click", () => {
+    const r = dayRecord(d.day);
+    const f = { ...(r.flags || {}) };
+    f[b.dataset.flag] = f[b.dataset.flag] === b.dataset.kind ? undefined : b.dataset.kind;
+    updateDay(d.day, { flags: f });
+    const y = window.scrollY;
+    renderQuiz(d.day);
+    window.scrollTo(0, y);
   }));
 }
 
@@ -447,13 +644,13 @@ function redirect(hash) { history.replaceState(null, "", hash); route(); }
 
 function route() {
   store = load();
-  const [, page, arg] = location.hash.split("/");
+  const [, page, arg, arg2] = location.hash.split("/");
   window.scrollTo(0, 0);
   if (page === "upload") return renderUpload();
   if (page === "plan") return renderPlan();
   if (page === "today") return renderToday();
-  if (page === "note") return renderNote(arg);
-  if (page === "quiz") return renderSoon(`Day ${arg} 퀴즈`);
+  if (page === "note") return renderNote(arg, arg2);
+  if (page === "quiz") return renderQuiz(arg);
   if (page === "history") return renderSoon("지난 공부");
   if (page === "settings") return renderSoon("설정");
   redirect(store.plan ? "#/today" : "#/upload");

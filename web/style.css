@@ -108,6 +108,35 @@ main { max-width: 680px; margin: 0 auto; padding: 48px 24px 80px; display: flex;
 @keyframes blink { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .dot.busy { animation: none; } }
 
+/* ---------- 퀴즈 ---------- */
+.q { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--line); padding-top: 28px; scroll-margin-top: 16px; }
+.q h2 { font-size: 18px; line-height: 1.6; font-weight: 500; letter-spacing: 0; }
+.opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 15px; }
+.opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); }
+label.opt { cursor: pointer; position: relative; }
+label.opt:hover { border-color: #c9d3e8; background: #fafbfd; }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt .n { color: var(--muted); min-width: 1em; }
+.opt.picked { border-color: var(--accent); background: var(--accent-soft); }
+.opt.picked .n { color: var(--accent); font-weight: 700; }
+label.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opt.done { border-color: transparent; }
+.opt.ok { background: var(--ok-bg); }
+.opt.ok .n, .opt.ok .tag { color: var(--ok); font-weight: 700; }
+.opt.bad { background: var(--bad-bg); }
+.opt.bad .n, .opt.bad .tag { color: var(--bad); font-weight: 700; }
+.opt .grow { flex: 1; }
+.opt .tag { font-size: 13px; white-space: nowrap; }
+.short { font: inherit; font-size: 16px; padding: 12px 14px; border: 1px solid var(--input); border-radius: 10px; width: 100%; }
+.short:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.short-result { margin: 0; font-size: 15px; }
+b.ok { color: var(--ok); } b.bad { color: var(--bad); }
+.code { margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 14px; line-height: 1.6; background: #f5f6f8; border-radius: 10px; padding: 14px 16px; white-space: pre-wrap; overflow-x: auto; }
+.explain { margin: 0; font-size: 14px; line-height: 1.7; color: #3d434b; }
+.q-links { display: flex; gap: 20px; flex-wrap: wrap; font-size: 14px; }
+.q-links .link { font-size: 14px; }
+.actions.ruled { border-top: 1px solid var(--line); padding-top: 28px; }
+
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
 .bar.wide { max-width: 1120px; padding: 0 40px; }
 main.wide { max-width: 1120px; padding: 80px 40px 112px; gap: 56px; }
