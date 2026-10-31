@@ -26,7 +26,7 @@
 - [ ] 정리본 스타일 선택: 필기 / 깔끔 ([#8](https://github.com/rlagkdms11/study-buddy/issues/8))
 
 ## 기술 스택
-- Python, Streamlit
+- Python, FastAPI (웹 버전 백엔드) · Streamlit (첫 버전)
 - PyMuPDF (PDF 텍스트 추출)
 - LLM API (정리본, 퀴즈, 설명 생성)
 
@@ -37,7 +37,22 @@ cd study-buddy
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# API 키는 .streamlit/secrets.toml의 GEMINI_API_KEY 또는 환경 변수 GEMINI_API_KEY에 넣기
+
+# 웹 버전 백엔드 (만드는 중) — http://127.0.0.1:8000/docs 에서 API 확인
+uvicorn server.main:app --reload
+
+# 첫 버전 (Streamlit)
 streamlit run app.py
+```
+
+## 폴더 구조
+```
+core/     PDF 글자 추출, 학습 계획, 프롬프트, AI 호출 (공통 코드)
+server/   FastAPI 백엔드
+app.py    Streamlit 첫 버전 화면
+render.py Streamlit용 정리본·퀴즈 그리기
 ```
 
 ## 개발 기록

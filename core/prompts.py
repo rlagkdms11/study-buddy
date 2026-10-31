@@ -76,3 +76,16 @@ QUIZ_PROMPT = """너는 대학생의 시험공부를 돕는 조교야.
   ]
 }
 """
+
+
+def note_prompt(pdf_text: str) -> str:
+    """정리본 프롬프트에 오늘 범위 PDF 내용을 붙인다."""
+    return SUMMARY_PROMPT + pdf_text
+
+
+def quiz_prompt(pdf_text: str, sections=()) -> str:
+    """퀴즈 프롬프트를 만든다. 정리본 섹션 이름을 주면 퀴즈의 section 칸을 그 이름에 맞춘다."""
+    hint = ""
+    if sections:
+        hint = "\nsection 칸에는 다음 섹션 제목 중 하나를 그대로 써: " + ", ".join(sections) + "\n"
+    return QUIZ_PROMPT + hint + "\n강의 PDF 내용:\n" + pdf_text
