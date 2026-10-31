@@ -515,7 +515,7 @@ function renderQuiz(day) {
         <div class="explain-foot">
           <a class="see-note" href="${sectionLink(q)}">정리본${pageRange(q.pages, multi) ? ` ${esc(pageRange(q.pages, multi))}` : ""}에서 다시 보기 →</a>
           <span class="chips-right">
-            <button type="button" class="chip ${flags[i] === "confused" ? "on" : ""}" data-flag="${i}" data-kind="confused" aria-pressed="${flags[i] === "confused"}">${flags[i] === "confused" ? "✓ " : ""}이해 안 돼요</button>
+            <!-- "이해 안 돼요"는 #4 설명 기능을 만들 때 다시 넣는다 (지금은 눌러도 하는 일이 없어서 숨김) -->
             <button type="button" class="chip ${flags[i] === "wrong" ? "on" : ""}" data-flag="${i}" data-kind="wrong" aria-pressed="${flags[i] === "wrong"}">${flags[i] === "wrong" ? "✓ 신고함" : "정답이 이상해요"}</button>
           </span>
         </div>
