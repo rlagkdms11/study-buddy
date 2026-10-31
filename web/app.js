@@ -31,7 +31,12 @@ function md(s) { const [, m, d] = s.split("-"); return `${+m}/${d}`; }
 function korDate(s) { const [, m, d] = s.split("-"); return `${+m}월 ${+d}일`; }
 
 async function api(path, options = {}) {
-  const res = await fetch(path, options);
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch {
+    throw new Error("서버에 연결하지 못했어요. 터미널에서 서버가 켜져 있는지 확인해 주세요.");
+  }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = typeof body.detail === "string" ? body.detail : "요청을 처리하지 못했어요.";
@@ -58,18 +63,30 @@ let uploaded = null;    // 서버가 읽어 준 결과
 
 function renderUpload() {
   app.innerHTML = `
-  <header><div class="bar center"><span class="logo">study-buddy</span></div></header>
-  <main style="max-width:560px">
-    <div class="head"><span class="step">1 / 2</span><h1 class="title">시험 범위 강의 PDF를 올려 주세요</h1></div>
-    <label class="drop" id="drop">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-      <span style="font-weight:500">끌어다 놓거나 눌러서 고르기</span>
-      <span class="hint">여러 개 가능</span>
-      <input id="file" type="file" accept="application/pdf,.pdf" multiple>
-    </label>
-    <div id="files"></div>
-    <div id="msg" role="status"></div>
-    <button class="primary wide" id="next" disabled>다음</button>
+  <header class="top"><div class="bar wide"><span class="logo">study-buddy</span></div></header>
+  <main class="wide two-col">
+    <div class="intro">
+      <span class="step">1 / 2</span>
+      <h1 class="title hero">시험 범위 강의 PDF를<br>올려 주세요</h1>
+      <p class="lede">올린 자료로 시험일까지 공부 범위를 나누고, 매일 그날 범위로 정리본과 퀴즈를 만들어 드려요.</p>
+      <ol class="howto">
+        <li><b>강의 PDF 올리기</b><span>여러 파일이면 강의 순서대로 알아서 정렬해요</span></li>
+        <li><b>시험일 고르기</b><span>남은 날에 맞춰 하루 분량을 나눠요</span></li>
+        <li><b>매일 정리본 읽고 퀴즈 풀기</b><span>틀린 문제는 복습 날에 다시 나와요</span></li>
+      </ol>
+      <p class="hint">자료는 정리본을 만들 때만 쓰고 서버에 저장하지 않아요.</p>
+    </div>
+    <div class="panel">
+      <label class="drop tall" id="drop">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <span style="font-weight:500;font-size:17px">끌어다 놓거나 눌러서 고르기</span>
+        <span class="hint">PDF · 여러 개 가능</span>
+        <input id="file" type="file" accept="application/pdf,.pdf" multiple>
+      </label>
+      <div id="files"></div>
+      <div id="msg" role="status"></div>
+      <button class="primary wide" id="next" disabled>다음</button>
+    </div>
   </main>`;
 
   const drop = document.getElementById("drop");
@@ -139,32 +156,40 @@ function renderPlan() {
   const style = store.style || "hand";
 
   app.innerHTML = `
-  <header><div class="bar split"><a href="#/upload" style="font-size:14px">← 이전</a><span class="logo">study-buddy</span><span style="width:40px"></span></div></header>
-  <main>
-    <div class="head"><span class="step">2 / 2</span><h1 class="title">시험일을 고르면 하루 분량을 나눠 드려요</h1></div>
-    <section class="dates" aria-label="날짜">
-      <label>공부 시작일<input type="date" id="start" value="${start}"></label>
-      <label>시험일<input type="date" id="exam" value="${exam}"></label>
-    </section>
-    <section class="section" id="days" aria-live="polite"></section>
-    <section class="section">
-      <div class="head" style="gap:4px"><h2>정리본 스타일</h2><span class="hint">나중에 설정에서 바꿀 수 있어요</span></div>
-      <div class="styles" role="radiogroup" aria-label="정리본 스타일">
-        <label class="style-card">
-          <div class="pv hand" aria-hidden="true"><span class="tape">1강</span><span class="hl">구성 요소 3가지</span><span class="u">Solution은 단계별 절차 아님</span><span class="why">↳ 왜? O/X 함정으로 자주 나와요</span></div>
-          <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="hand" ${style === "hand" ? "checked" : ""}><b>필기 스타일</b></span>
-          <ul><li>밑줄 + 형광펜 = 시험에 나올 내용</li><li>빨간 손글씨 = 왜 중요한지</li><li>단원마다 테이프 라벨, 비유는 메모</li></ul>
-          <small>시험 직전 훑어보기 좋아요</small>
-        </label>
-        <label class="style-card">
-          <div class="pv clean" aria-hidden="true"><b>구성 요소 3가지</b><span class="bars"><span></span><span></span></span><span class="chips"><span></span><span></span><span></span></span></div>
-          <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="clean" ${style === "clean" ? "checked" : ""}><b>깔끔 스타일</b></span>
-          <ul><li>개념마다 "왜 → 그래서" 카드</li><li>단서 · 비교는 표로 정리</li><li>분류는 색으로 구분</li></ul>
-          <small>처음 배울 때 차근차근 읽기 좋아요</small>
-        </label>
+  <header class="top"><div class="bar wide split"><span class="logo">study-buddy</span><a href="#/upload" style="font-size:14px">← 자료 다시 고르기</a></div></header>
+  <main class="wide">
+    <div class="head"><span class="step">2 / 2</span><h1 class="title hero">시험일을 고르면 하루 분량을 나눠 드려요</h1></div>
+    <div class="plan-grid">
+      <div class="plan-main">
+        <section class="dates" aria-label="날짜">
+          <label>공부 시작일<input type="date" id="start" value="${start}"></label>
+          <label>시험일<input type="date" id="exam" value="${exam}"></label>
+        </section>
+        <section class="section" id="days" aria-live="polite"></section>
       </div>
-    </section>
-    <button class="primary wide" id="go" disabled>이 계획으로 시작하기</button>
+      <aside class="plan-side">
+        <div class="head" style="gap:4px"><h2 style="font-size:17px">정리본 스타일</h2><span class="hint">나중에 설정에서 바꿀 수 있어요</span></div>
+        <div class="styles stack" role="radiogroup" aria-label="정리본 스타일">
+          <label class="style-card">
+            <div class="pv hand" aria-hidden="true"><span class="tape">1강</span><span class="hl">구성 요소 3가지</span><span class="u">Solution은 단계별 절차 아님</span><span class="why">↳ 왜? O/X 함정 단골!</span></div>
+            <div class="card-text">
+              <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="hand" ${style === "hand" ? "checked" : ""}><b>필기 스타일</b></span>
+              <ul><li>밑줄 + 형광펜 = 시험에 나올 내용</li><li>빨간 손글씨 = 왜 중요한지</li><li>단원마다 테이프 라벨, 비유는 메모</li></ul>
+              <small>시험 직전 훑어보기 좋아요</small>
+            </div>
+          </label>
+          <label class="style-card">
+            <div class="pv clean" aria-hidden="true"><b>구성 요소 3가지</b><span class="bars"><span></span><span></span></span><span class="chips"><span></span><span></span><span></span></span></div>
+            <div class="card-text">
+              <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="clean" ${style === "clean" ? "checked" : ""}><b>깔끔 스타일</b></span>
+              <ul><li>개념마다 "왜 → 그래서" 카드</li><li>단서 · 비교는 표로 정리</li><li>분류는 색으로 구분</li></ul>
+              <small>처음 배울 때 차근차근 읽기 좋아요</small>
+            </div>
+          </label>
+        </div>
+        <button class="primary wide" id="go" disabled>이 계획으로 시작하기</button>
+      </aside>
+    </div>
   </main>`;
 
   let plan = null, showAll = false;
@@ -176,11 +201,11 @@ function renderPlan() {
     const box = document.getElementById("days");
     if (!plan) return;
     const per = Math.round(store.pages.length / plan.length);
-    const list = showAll ? plan : plan.slice(0, 3);
+    const list = showAll ? plan : plan.slice(0, 7);
     box.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <h2>${plan.length}일 · 하루 약 ${per}쪽</h2>
-        ${plan.length > 3 ? `<button class="link" id="all" style="font-size:14px">${showAll ? "접기" : "전체 보기"}</button>` : ""}
+        ${plan.length > 7 ? `<button class="link" id="all" style="font-size:14px">${showAll ? "접기" : `전체 ${plan.length}일 보기`}</button>` : ""}
       </div>
       <ol class="rows">${list.map((d) => `<li class="plan-row"><span class="when">Day ${d.day} · ${md(d.date)}</span><span>${esc(d.label)}</span></li>`).join("")}</ol>`;
     const all = document.getElementById("all");
