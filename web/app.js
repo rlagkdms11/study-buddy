@@ -301,6 +301,113 @@ async function prepare(d) {
   }
 }
 
+// ---------- ④ 정리본 (필기 스타일) ----------
+const TAPES = ["#ffd3de", "#c8f0df", "#d3e4ff"];
+
+// 전체 쪽 번호를 "p.3" 또는 여러 강의가 섞이면 "1강 p.3"처럼 바꾼다
+function lectureShort(name) {
+  const m = name.match(/^[\d\-~]+강/);
+  return m ? m[0] : name;
+}
+function pageRange(nums, multi) {
+  const list = (nums || []).map((n) => store.pages[n - 1]).filter(Boolean);
+  if (!list.length) return "";
+  const a = list[0], b = list[list.length - 1];
+  const prefix = multi ? `${lectureShort(a.file)} ` : "";
+  if (a.file !== b.file) return `${lectureShort(a.file)} p.${a.page} – ${lectureShort(b.file)} p.${b.page}`;
+  return a.page === b.page ? `${prefix}p.${a.page}` : `${prefix}p.${a.page}–${b.page}`;
+}
+const stars = (n) => "★".repeat(Math.max(0, Math.min(3, +n || 0)));
+const arr = (x) => (Array.isArray(x) ? x : []);
+
+function renderNote(day) {
+  if (!store.plan) return redirect("#/upload");
+  const d = store.plan.find((p) => String(p.day) === String(day));
+  if (!d) return redirect("#/today");
+  const rec = dayRecord(d.day);
+  const note = rec.note;
+  const multi = new Set(store.pages.slice(d.start - 1, d.end).map((p) => p.file)).size > 1;
+
+  if (!note) {
+    app.innerHTML = `${navHeader("")}
+    <main><div class="head"><span class="meta">Day ${d.day} · ${esc(d.label)}</span><h1 class="title">정리본을 아직 만들지 않았어요</h1>
+    <span class="hint">오늘 화면을 열면 자동으로 만들기 시작해요.</span></div>
+    <div class="actions"><a class="primary" href="#/today">오늘로 가서 만들기</a></div></main>`;
+    return;
+  }
+
+  const sections = arr(note.sections);
+  const top = sections.flatMap((s) => arr(s.key_points).filter((k) => +k.importance >= 3).map((k) => k.text)).slice(0, 5);
+  const comps = arr(note.review && note.review.comparisons);
+
+  const sectionHTML = (s, i) => {
+    const pts = arr(s.key_points), traps = arr(s.traps), clues = arr(s.clues);
+    return `
+    <section class="paper unit" id="s${i}">
+      ${pageRange(s.pages, multi) ? `<span class="tape" style="background:${TAPES[i % 3]}">${esc(pageRange(s.pages, multi))}</span>` : ""}
+      <h2>${esc(s.title)}${s.importance ? `<span class="stars" aria-label="중요도 ${+s.importance}">${stars(s.importance)}</span>` : ""}</h2>
+      ${s.link ? `<p class="lead">${esc(s.link)}</p>` : ""}
+      ${s.why || s.so ? `<div class="flow">${s.why ? `왜? ${esc(s.why)}` : ""}${s.why && s.so ? " → " : ""}${s.so ? `그래서 ${esc(s.so)}` : ""}</div>` : ""}
+      ${pts.length ? `<h3><b style="background:linear-gradient(transparent 55%, ${TAPES[(i + 1) % 3]} 55%)">꼭 외울 것</b></h3>
+        <ul>${pts.map((k) => `<li>${+k.importance >= 2 ? `<span class="u">${esc(k.text)}</span>` : esc(k.text)}</li>`).join("")}</ul>` : ""}
+      ${traps.length ? traps.map((t) => `<span class="red">↳ 주의! ${esc(t.text)}</span>`).join("") : ""}
+      ${clues.length ? `<h3><b style="background:linear-gradient(transparent 55%, ${TAPES[(i + 2) % 3]} 55%)">이런 말이 보이면</b></h3>
+        <div class="tbl"><table><tr><th>문제에 이런 문장이 보이면</th><th>답</th></tr>
+        ${clues.map((c) => `<tr><td>${esc(c.clue)}</td><td>${esc(c.answer)}</td></tr>`).join("")}</table></div>` : ""}
+      ${s.definition ? `<h3><b style="background:linear-gradient(transparent 55%, #ffd3de 55%)">서술형 한 문장</b></h3><p><span class="u">${esc(s.definition)}</span></p>` : ""}
+      ${s.analogy ? `<div class="memo">비유 (자료 밖 설명) · ${esc(s.analogy)}</div>` : ""}
+      ${s.check && s.check.q ? `<div style="margin-top:12px">
+        <button type="button" class="hand-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>
+        <div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<span class="red">A. ${esc(s.check.a)}</span></div></div>` : ""}
+    </section>`;
+  };
+
+  app.innerHTML = `<div class="note-page"><div class="note-wrap">
+    <div class="note-top">
+      <span class="muted">Day ${d.day} · ${esc(d.label)}</span>
+      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="pill" href="#/quiz/${d.day}">퀴즈 풀기 ✎</a></span>
+    </div>
+    <header class="paper note-head">
+      <div class="sub">Day ${d.day} · ${md(d.date)}</div>
+      <h1><span>${esc(note.title || "정리 노트")}</span></h1>
+      <p>${esc(d.label)} (${d.count}쪽)을 강의 순서대로 정리했어요. 자료에 있는 내용만 담았어요.</p>
+      <div class="legend">
+        <div><span class="u">밑줄 + 형광펜</span> = 시험에 나올 확률 높음</div>
+        <div><span class="hand" style="font-size:18px;color:#d93a55">빨간 손글씨</span> = 틀리기 쉬운 점</div>
+        <div><span class="src" style="margin:0">p.3</span> = 슬라이드 번호</div>
+      </div>
+    </header>
+    <nav class="note-chips" aria-label="단원 바로가기">
+      ${sections.map((s, i) => `<a href="#s${i}" data-jump="s${i}">${i + 1} ${esc(s.title)}</a>`).join("")}
+      ${top.length ? `<a href="#top" data-jump="top">꼭 외울 것</a>` : ""}
+      ${comps.length ? `<a href="#cmp" data-jump="cmp">헷갈리는 쌍</a>` : ""}
+    </nav>
+    ${sections.map(sectionHTML).join("")}
+    ${top.length ? `<section class="paper unit" id="top"><span class="tape" style="background:#d3e4ff">꼭 외울 것</span>
+      <h2>시험 직전 TOP ${top.length}</h2><ol>${top.map((t) => `<li>${esc(t)}</li>`).join("")}</ol></section>` : ""}
+    ${comps.length ? `<section class="paper unit" id="cmp"><span class="tape" style="background:#ffd3de">헷갈리는 쌍</span>
+      ${comps.map((c) => `<h3>${esc(c.title)}</h3><div class="tbl"><table>
+        <tr>${arr(c.header).map((h) => `<th>${esc(h)}</th>`).join("")}</tr>
+        ${arr(c.rows).map((r) => `<tr>${arr(r).map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`).join("")}</section>` : ""}
+    <div class="note-end">
+      <span class="hand" style="font-size:22px;color:#5d6880">다 읽었으면 바로 확인해 봐요!</span>
+      <a class="big-quiz" href="#/quiz/${d.day}">이 범위 퀴즈 풀기 →</a>
+    </div>
+  </div></div>`;
+
+  // 단원 바로가기: 주소(#/note/1)를 바꾸지 않고 그 단원으로 스크롤
+  app.querySelectorAll("[data-jump]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById(a.dataset.jump).scrollIntoView({ behavior: "smooth" });
+  }));
+  app.querySelectorAll("[data-check]").forEach((b) => b.addEventListener("click", () => {
+    const box = document.getElementById("c" + b.dataset.check);
+    box.hidden = !box.hidden;
+    b.setAttribute("aria-expanded", String(!box.hidden));
+    b.textContent = box.hidden ? "확인 질문 보기" : "확인 질문 접기";
+  }));
+}
+
 // ---------- 아직 만들지 않은 화면 ----------
 function renderSoon(name) {
   app.innerHTML = `${navHeader(name === "지난 공부" ? "history" : "")}
@@ -320,7 +427,7 @@ function route() {
   if (page === "upload") return renderUpload();
   if (page === "plan") return renderPlan();
   if (page === "today") return renderToday();
-  if (page === "note") return renderSoon(`Day ${arg} 정리본`);
+  if (page === "note") return renderNote(arg);
   if (page === "quiz") return renderSoon(`Day ${arg} 퀴즈`);
   if (page === "history") return renderSoon("지난 공부");
   if (page === "settings") return renderSoon("설정");
