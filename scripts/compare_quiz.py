@@ -11,7 +11,6 @@
 """
 import argparse
 import json
-import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +18,7 @@ from pathlib import Path
 from core import pdf
 from core.ai import ask_ai
 from core.prompts import QUIZ_PROMPT
+from core.quiz_check import check_and_fix, find_weak
 
 OLD_QUIZ_PROMPT = """너는 대학생의 시험공부를 돕는 조교야.
 아래 강의 PDF 내용으로 복습 퀴즈 10문항을 만들어 줘.
@@ -56,47 +56,10 @@ OLD_QUIZ_PROMPT = """너는 대학생의 시험공부를 돕는 조교야.
 }
 """
 
-# 조사·어미를 떼고 비교한다 (한국어는 "취약점을"처럼 붙어 나와서)
-JOSA = ("으로써", "에서는", "에게서", "으로", "에서", "에게", "까지", "부터", "보다", "처럼", "하는", "하고", "하여", "되는", "된다",
-        "한다", "이다", "이며", "하기", "해서", "을", "를", "이", "가", "은", "는", "의", "에", "와", "과", "로", "도", "만", "한", "된")
-STOP = {"것", "수", "등", "때", "및", "위한", "대한", "통해", "모든", "가장", "있는", "없는", "있다", "없다", "같은", "다른", "특정", "경우"}
-
-
-def words(text: str) -> list[str]:
-    """보기 문장에서 내용 단어만 뽑는다 (2글자 이상, 조사 뗀 형태)."""
-    out = []
-    for w in re.findall(r"[가-힣A-Za-z0-9]+", text):
-        for j in JOSA:
-            if w.endswith(j) and len(w) - len(j) >= 2:
-                w = w[: -len(j)]
-                break
-        if len(w) >= 2 and w not in STOP:
-            out.append(w.lower())
-    return out
-
-
-def grounding(option: str, source: str) -> float:
-    """보기의 내용 단어 중 강의 범위 글자에 실제로 나오는 비율 (0~1)."""
-    ws = words(option)
-    if not ws:
-        return 1.0
-    return sum(1 for w in ws if w in source) / len(ws)
-
-
-def score_quiz(quiz: dict, source: str, threshold: float = 0.5):
-    """오답 보기마다 근거 비율을 재고, 기준보다 낮은 보기를 모은다."""
-    src = re.sub(r"\s+", "", source).lower()
-    total, weak = 0, []
-    for n, q in enumerate(quiz.get("questions", []), start=1):
-        if q.get("type") != "choice":
-            continue
-        for k, opt in enumerate(q.get("options", []), start=1):
-            if k == q.get("answer_index"):
-                continue
-            total += 1
-            g = grounding(opt, src)
-            if g < threshold:
-                weak.append((n, k, round(g, 2), opt))
+def score_quiz(quiz: dict, source: str):
+    """오답 보기 수와 근거 약한 보기 목록."""
+    total = sum(len(q.get("options", [])) - 1 for q in quiz.get("questions", []) if q.get("type") == "choice")
+    weak = [(w["q"] + 1, w["o"] + 1, w["grounding"], w["option"]) for w in find_weak(quiz, source)]
     return total, weak
 
 
@@ -137,6 +100,18 @@ def main():
             print(f"  {sec:.0f}초 · 오답 보기 {total}개 중 근거 약한 보기 {len(weak)}개")
             for n, k, g, opt in weak:
                 print(f"    Q{n} 보기{k} (근거 {g:.0%}): {opt}")
+            if version == "새 프롬프트" and weak:
+                print("  ▶ 자동 검사 + 고치기...", flush=True)
+                t2 = time.perf_counter()
+                check = check_and_fix(quiz, source, lambda pr: ask_ai(pr, as_json=True, models=[model]))
+                sec2 = time.perf_counter() - t2
+                total2, weak2 = score_quiz(quiz, source)
+                fixed_name = name.replace(".json", "-fixed.json")
+                (out_dir / fixed_name).write_text(json.dumps(quiz, ensure_ascii=False, indent=2), encoding="utf-8")
+                rows.append(("새+자동검사", model, sec + sec2, total2, len(weak2), fixed_name))
+                print(f"  {sec2:.0f}초 더 · 고친 보기 {check['fixed']}개 · 남은 근거 약한 보기 {len(weak2)}개")
+                for n, k, g, opt in weak2:
+                    print(f"    Q{n} 보기{k} (근거 {g:.0%}): {opt}")
             print()
 
     print("=" * 60)

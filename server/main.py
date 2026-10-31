@@ -19,6 +19,7 @@ from core import pdf
 from core.ai import ask_ai
 from core.plan import make_plan
 from core.prompts import note_prompt, quiz_prompt
+from core.quiz_check import check_and_fix
 
 log = logging.getLogger("study-buddy")
 
@@ -128,7 +129,13 @@ def quiz(req: QuizRequest):
     """오늘 범위로 퀴즈를 만든다. 정리본 섹션 이름을 주면 퀴즈와 정리본이 연결된다."""
     text = pdf.build_pdf_text([p.model_dump() for p in req.pages], first=req.first)
     result, elapsed = run_ai(quiz_prompt(text, req.sections), "퀴즈")
-    return {"quiz": result, "elapsed": elapsed}
+    # 강의에 없는 엉뚱한 오답 보기를 코드로 찾아서, 그 보기만 다시 만든다 (#20)
+    start = time.perf_counter()
+    source = " ".join(p.text for p in req.pages)
+    check = check_and_fix(result, source, lambda prompt: ask_ai(prompt, as_json=True))
+    check["seconds"] = round(time.perf_counter() - start, 1)
+    print(f"[퀴즈 검사] 근거 약한 보기 {check['weak_before']}개 → 고침 {check['fixed']}개 → 남음 {check['weak_after']}개 ({check['seconds']}초)")
+    return {"quiz": result, "elapsed": round(elapsed + check["seconds"], 1), "check": check}
 
 
 # ---------- 화면 ----------
