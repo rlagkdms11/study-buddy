@@ -9,9 +9,18 @@ from ai import ask_ai
 from prompts import SUMMARY_PROMPT, QUIZ_PROMPT
 from render import render_note, render_quiz
 
-st.title("study-buddy")
+# ▼ 브라우저 탭 이름과 아이콘 (Streamlit 명령 중 가장 먼저 와야 한다)
+st.set_page_config(page_title="study-buddy", page_icon="📚")
 
-# ▼ 여러 파일 업로드
+# ▼ 처음 온 사람을 위한 소개와 사용 순서
+st.title("📚 study-buddy")
+st.write("강의 PDF를 올리면 시험일까지 공부 범위를 나눠 주고, 그날 범위로 정리본과 복습 퀴즈를 만들어 줘요.")
+st.caption("① PDF 올리기 → ② 시험일 고르기 → ③ 정리본 만들기 → ④ 퀴즈 풀기")
+
+# ▼ 개발용 화면은 사이드바 스위치를 켰을 때만 보인다
+with st.sidebar:
+    dev_mode = st.toggle("개발자 모드", help="추출한 텍스트와 AI 원본 응답을 보여 줘요")
+
 pdfs = st.file_uploader("강의 PDF를 올려 주세요 (여러 개 가능)", type="pdf", accept_multiple_files=True)
 
 
@@ -108,19 +117,18 @@ if pdfs:
     files, items = load_all(pdfs)
     st.caption(f"자료 {len(files)}개 · 총 {len(items)}쪽 · 순서: " + " → ".join(f.name for f in files))
 
-    # 화면에 보여 줄 쪽 번호: 전체 번호 → '2강 p.3' (파일이 하나면 'p.3')
     def page_label(n):
         if not 1 <= n <= len(items):
             return f"p.{n}"
         it = items[n - 1]
         return f"p.{it['page']}" if len(files) == 1 else f"{it['file']} p.{it['page']}"
 
-    with st.expander("추출한 텍스트 보기"):
-        for n, it in enumerate(items, start=1):
-            st.markdown(f"**{it['file']} {it['page']}쪽**")
-            st.text(it["text"] or "(글자 없음)")
+    if dev_mode:  # ▼ 개발자 모드에서만
+        with st.expander("추출한 텍스트 보기"):
+            for it in items:
+                st.markdown(f"**{it['file']} {it['page']}쪽**")
+                st.text(it["text"] or "(글자 없음)")
 
-    # 학습 계획
     st.subheader("📅 학습 계획")
     left, right = st.columns(2)
     start_date = left.date_input("공부 시작일", value=date.today())
@@ -131,8 +139,9 @@ if pdfs:
         st.warning("시험일은 공부 시작일보다 뒤로 골라 주세요.")
         st.stop()
 
-    st.table([{"날짜": f"Day {p['day']} ({p['date']:%m/%d})",
-               "범위": describe_range(items, p["start"], p["end"])} for p in plan])
+    with st.expander(f"전체 계획 보기 ({len(plan)}일)"):  # ▼ 긴 표는 접어 둔다
+        st.table([{"날짜": f"Day {p['day']} ({p['date']:%m/%d})",
+                   "범위": describe_range(items, p["start"], p["end"])} for p in plan])
 
     today_idx = next((i for i, p in enumerate(plan) if p["date"] == date.today()), 0)
     idx = st.selectbox(
@@ -143,52 +152,62 @@ if pdfs:
     count = chosen["end"] - chosen["start"] + 1
     st.success(f"오늘 범위: {describe_range(items, chosen['start'], chosen['end'])} ({count}쪽)")
 
+    # ▼ 하루 분량이 많으면 미리 알려 준다
+    if count > 20:
+        st.warning(f"하루 {count}쪽이라 몇 분 걸릴 수 있어요. 시험일을 늦추면 하루 분량이 줄어요.")
+
     range_id = "|".join(f"{f.name}{f.size}" for f in files) + f"-{chosen['start']}-{chosen['end']}"
     if st.session_state.get("range_id") != range_id:
         reset_results()
         st.session_state["range_id"] = range_id
 
-    # 오늘 범위만 AI에 보낸다
     today_items = items[chosen["start"] - 1:chosen["end"]]
     pdf_text = build_pdf_text(today_items, first=chosen["start"])
 
-    st.divider()
+    # ▼ 정리본과 퀴즈를 탭으로 나눈다
+    note_tab, quiz_tab = st.tabs(["📝 정리본", "✏️ 퀴즈"])
 
-    if st.button("정리본 만들기"):
-        try:
-            start = time.perf_counter()
-            with st.spinner(f"{count}쪽 정리본을 만드는 중... 보통 1~2분 걸려요"):
-                st.session_state["note"] = make_note(pdf_text)
-            st.session_state["elapsed"] = time.perf_counter() - start
-        except Exception as e:
-            st.error(f"정리본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
+    with note_tab:
+        if st.button("정리본 만들기"):
+            try:
+                start = time.perf_counter()
+                with st.spinner(f"{count}쪽 정리본을 만드는 중... 보통 2~3분 걸려요. 창을 닫지 말아 주세요"):
+                    st.session_state["note"] = make_note(pdf_text)
+                st.session_state["elapsed"] = time.perf_counter() - start
+            except Exception as e:
+                st.error(f"정리본을 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
 
-    if "note" in st.session_state:
-        if "elapsed" in st.session_state:
-            st.caption(f"정리본 생성: {st.session_state['elapsed']:.0f}초")
-        render_note(st.session_state["note"], page_label=page_label)
-        with st.expander("AI가 보낸 원본 JSON 보기"):
-            st.json(st.session_state["note"])
+        if "note" in st.session_state:
+            if "elapsed" in st.session_state:
+                st.caption(f"정리본 생성: {st.session_state['elapsed']:.0f}초")
+            render_note(st.session_state["note"], page_label=page_label)
+            if dev_mode:
+                with st.expander("AI가 보낸 원본 JSON 보기"):
+                    st.json(st.session_state["note"])
 
-    st.divider()
-    st.header("복습 퀴즈")
+    with quiz_tab:
+        if "note" not in st.session_state:
+            st.info("정리본을 먼저 만들면 퀴즈가 정리본 섹션과 연결돼요.")
 
-    if st.button("퀴즈 만들기"):
-        try:
-            start = time.perf_counter()
-            sections = tuple(st.session_state.get("note", {}).get("map", []))
-            with st.spinner("퀴즈를 만드는 중..."):
-                quiz = make_quiz(pdf_text, sections)
-            for key in [k for k in st.session_state if str(k).startswith("q_")]:
-                del st.session_state[key]
-            st.session_state["quiz"] = quiz
-            st.session_state["quiz_submitted"] = False
-            st.session_state["quiz_elapsed"] = time.perf_counter() - start
-        except Exception as e:
-            st.error(f"퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
+        if st.button("퀴즈 만들기"):
+            try:
+                start = time.perf_counter()
+                sections = tuple(st.session_state.get("note", {}).get("map", []))
+                with st.spinner("퀴즈를 만드는 중... 보통 2~3분 걸려요. 창을 닫지 말아 주세요"):
+                    quiz = make_quiz(pdf_text, sections)
+                for key in [k for k in st.session_state if str(k).startswith("q_")]:
+                    del st.session_state[key]
+                st.session_state["quiz"] = quiz
+                st.session_state["quiz_submitted"] = False
+                st.session_state["quiz_elapsed"] = time.perf_counter() - start
+            except Exception as e:
+                st.error(f"퀴즈를 만들지 못했어요. 잠시 후 다시 시도해 주세요.\n\n({e})")
 
-    if "quiz" in st.session_state:
-        st.caption(f"퀴즈 생성: {st.session_state.get('quiz_elapsed', 0):.0f}초")
-        render_quiz(st.session_state["quiz"], page_label=page_label)
-        with st.expander("AI가 보낸 퀴즈 원본 JSON 보기"):
-            st.json(st.session_state["quiz"])
+        if "quiz" in st.session_state:
+            st.caption(f"퀴즈 생성: {st.session_state.get('quiz_elapsed', 0):.0f}초")
+            render_quiz(st.session_state["quiz"], page_label=page_label)
+            if dev_mode:
+                with st.expander("AI가 보낸 퀴즈 원본 JSON 보기"):
+                    st.json(st.session_state["quiz"])
+else:
+    st.info("PDF를 올리면 시작할 수 있어요.")
