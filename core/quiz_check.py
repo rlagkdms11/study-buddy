@@ -193,3 +193,51 @@ def check_and_fix(quiz: dict, source: str, ask) -> dict:
         report["dropped"] = len(left)
     report["weak_after"] = len(find_weak(quiz, source))
     return report
+
+
+def find_structure_issues(quiz: dict, first: int, last: int) -> dict:
+    """보기 내용 말고 퀴즈 모양의 실수를 센다 (비교 스크립트에서 사용).
+    - 정답 불일치: answer_index가 가리키는 보기와 answer_text가 다름
+    - 보기 중복: 같은 문제에 같은 보기가 두 번
+    - 범위 밖 쪽: 근거 쪽 번호가 오늘 범위(first~last) 밖
+    - 정답 위치: 객관식 정답 번호별 개수 (한쪽으로 쏠리면 찍어서 맞힘)
+    """
+    issues = {"정답 불일치": [], "보기 중복": [], "범위 밖 쪽": []}
+    positions = [0, 0, 0, 0]
+    for n, q in enumerate(quiz.get("questions", []), start=1):
+        for p in q.get("pages") or []:
+            if not isinstance(p, int) or not first <= p <= last:
+                issues["범위 밖 쪽"].append(f"Q{n} p.{p}")
+        if q.get("type") != "choice":
+            continue
+        opts = q.get("options") or []
+        ai = q.get("answer_index")
+        if not isinstance(ai, int) or not 1 <= ai <= len(opts):
+            issues["정답 불일치"].append(f"Q{n} 정답 번호 {ai}")
+            continue
+        positions[min(ai, 4) - 1] += 1
+        a, b = compact(str(q.get("answer_text", ""))), compact(opts[ai - 1])
+        if a and a != b and a not in b and b not in a:
+            issues["정답 불일치"].append(f"Q{n} {ai}번={opts[ai - 1][:20]} / 정답칸={q.get('answer_text')}")
+        if len({compact(o) for o in opts}) != len(opts):
+            issues["보기 중복"].append(f"Q{n}")
+    return {"issues": issues, "positions": positions}
+
+
+def shuffle_options(quiz: dict, rng=None) -> None:
+    """객관식 보기 순서를 코드로 섞는다. AI는 정답을 2번에 몰아 두는 버릇이 있어서,
+    정답 위치로 찍어 맞히지 못하게 한다. answer_index와 option_sources도 같이 옮긴다."""
+    import random
+    rng = rng or random.Random()
+    for q in quiz.get("questions", []):
+        opts = q.get("options") or []
+        ai = q.get("answer_index")
+        if q.get("type") != "choice" or not isinstance(ai, int) or not 1 <= ai <= len(opts):
+            continue
+        order = list(range(len(opts)))
+        rng.shuffle(order)
+        q["options"] = [opts[i] for i in order]
+        src = q.get("option_sources")
+        if isinstance(src, list) and len(src) == len(opts):
+            q["option_sources"] = [src[i] for i in order]
+        q["answer_index"] = order.index(ai - 1) + 1

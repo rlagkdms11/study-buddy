@@ -4,8 +4,9 @@
 오답 보기가 강의 내용에 근거하는지 숫자로 비교한다.
 
 실행 (프로젝트 폴더에서):
-    python -m scripts.compare_quiz "1강.pdf" --start 1 --end 9
-    python -m scripts.compare_quiz "1강.pdf" "2-3강.pdf" --start 10 --end 20 --models gemini-3.5-flash-lite
+    python -m scripts.compare_quiz scripts/out/1강.pdf --start 1 --end 9
+    python -m scripts.compare_quiz scripts/out/1강.pdf --ranges 1-5 6-10 1-9 --runs 3
+    python -m scripts.compare_quiz 1강.pdf 2-3강.pdf --ranges 1-10 11-25 --models gemini-3.5-flash-lite gemini-3.8-flash
 
 결과: 화면에 요약, scripts/out/에 퀴즈 원본 JSON 저장
 """
@@ -18,7 +19,7 @@ from pathlib import Path
 from core import pdf
 from core.ai import ask_ai
 from core.prompts import QUIZ_PROMPT
-from core.quiz_check import check_and_fix, find_weak
+from core.quiz_check import check_and_fix, find_structure_issues, find_weak, shuffle_options
 
 OLD_QUIZ_PROMPT = """너는 대학생의 시험공부를 돕는 조교야.
 아래 강의 PDF 내용으로 복습 퀴즈 10문항을 만들어 줘.
@@ -63,66 +64,92 @@ def score_quiz(quiz: dict, source: str):
     return total, weak
 
 
+def run_once(prompt, text, source, model, first, last, fix):
+    """퀴즈 하나를 만들고 (필요하면 자동 검사 후) 점수를 돌려준다."""
+    start = time.perf_counter()
+    quiz = ask_ai(prompt + "\n강의 PDF 내용:\n" + text, as_json=True, models=[model])
+    check = None
+    if fix:
+        check = check_and_fix(quiz, source, lambda pr: ask_ai(pr, as_json=True, models=[model]))
+        shuffle_options(quiz)
+    sec = time.perf_counter() - start
+    total, weak = score_quiz(quiz, source)
+    shape = find_structure_issues(quiz, first, last)
+    return quiz, {"sec": sec, "total": total, "weak": weak, "check": check, "shape": shape,
+                  "questions": len(quiz.get("questions", []))}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("pdfs", nargs="+", help="강의 PDF 파일")
-    ap.add_argument("--start", type=int, default=1, help="전체 쪽 번호 시작")
-    ap.add_argument("--end", type=int, default=10, help="전체 쪽 번호 끝")
-    ap.add_argument("--models", nargs="+", default=["gemini-3.5-flash-lite", "gemini-3.8-flash"])
+    ap.add_argument("--ranges", nargs="+", default=None, help='비교할 범위들 (전체 쪽 번호). 예: 1-5 6-10')
+    ap.add_argument("--start", type=int, default=1, help="--ranges 대신 범위 하나만 줄 때 시작")
+    ap.add_argument("--end", type=int, default=10, help="--ranges 대신 범위 하나만 줄 때 끝")
+    ap.add_argument("--runs", type=int, default=1, help="범위마다 몇 번씩 만들지")
+    ap.add_argument("--models", nargs="+", default=["gemini-3.5-flash-lite"])
     args = ap.parse_args()
 
     files = [(Path(p).name, Path(p).read_bytes()) for p in args.pdfs]
     _, items = pdf.load_all(files)
-    chosen = items[args.start - 1: args.end]
-    text = pdf.build_pdf_text(chosen, first=args.start)
-    source = " ".join(it["text"] for it in chosen)
-    print(f"범위: {pdf.describe_range(items, args.start, args.end)} ({len(chosen)}쪽)\n")
+    ranges = [tuple(map(int, r.split("-"))) for r in args.ranges] if args.ranges else [(args.start, args.end)]
 
     out_dir = Path(__file__).parent / "out"
     out_dir.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%m%d-%H%M")
-    rows = []
-    for version, prompt in [("이전 프롬프트", OLD_QUIZ_PROMPT), ("새 프롬프트", QUIZ_PROMPT)]:
-        for model in args.models:
-            print(f"▶ {version} · {model} 만드는 중...", flush=True)
-            start = time.perf_counter()
-            try:
-                quiz = ask_ai(prompt + "\n강의 PDF 내용:\n" + text, as_json=True, models=[model])
-            except Exception as e:
-                print(f"  실패: {e}\n")
-                rows.append((version, model, None, None, None, None))
-                continue
-            sec = time.perf_counter() - start
-            total, weak = score_quiz(quiz, source)
-            name = f"{stamp}-{'old' if version.startswith('이전') else 'new'}-{model}.json"
-            (out_dir / name).write_text(json.dumps(quiz, ensure_ascii=False, indent=2), encoding="utf-8")
-            rows.append((version, model, sec, total, len(weak), name))
-            print(f"  {sec:.0f}초 · 오답 보기 {total}개 중 근거 약한 보기 {len(weak)}개")
-            for n, k, g, opt in weak:
-                print(f"    Q{n} 보기{k} (근거 {g:.0%}): {opt}")
-            if version == "새 프롬프트" and weak:
-                print("  ▶ 자동 검사 + 고치기...", flush=True)
-                t2 = time.perf_counter()
-                check = check_and_fix(quiz, source, lambda pr: ask_ai(pr, as_json=True, models=[model]))
-                sec2 = time.perf_counter() - t2
-                total2, weak2 = score_quiz(quiz, source)
-                fixed_name = name.replace(".json", "-fixed.json")
-                (out_dir / fixed_name).write_text(json.dumps(quiz, ensure_ascii=False, indent=2), encoding="utf-8")
-                rows.append(("새+자동검사", model, sec + sec2, total2, len(weak2), fixed_name))
-                print(f"  {sec2:.0f}초 더 · 보기 고침 {check['fixed']} · 문제 바꿈 {check['rewritten']} · 뺌 {check['dropped']} · 남은 문제 {len(quiz['questions'])}개 · 남은 근거 약한 보기 {len(weak2)}개")
-                for n, k, g, opt in weak2:
-                    print(f"    Q{n} 보기{k} (근거 {g:.0%}): {opt}")
-            print()
+    versions = [("이전 프롬프트", OLD_QUIZ_PROMPT, False), ("새 프롬프트", QUIZ_PROMPT, False), ("새+자동검사", QUIZ_PROMPT, True)]
+    results = {}  # (범위, 버전, 모델) -> [결과...]
 
-    print("=" * 60)
-    print(f"{'프롬프트':<10}{'모델':<26}{'시간':>6}{'근거 약한 오답':>14}")
-    for version, model, sec, total, weak, _ in rows:
-        if sec is None:
-            print(f"{version:<10}{model:<26}{'실패':>6}")
-        else:
-            print(f"{version:<10}{model:<26}{sec:>5.0f}초{weak:>7} / {total}")
-    print("\n근거 약한 오답 = 내용 단어의 절반 미만이 강의 범위에 나오는 보기 (엉뚱한 보기 후보)")
-    print(f"퀴즈 원본: {out_dir}")
+    for a, b in ranges:
+        chosen = items[a - 1: b]
+        text = pdf.build_pdf_text(chosen, first=a)
+        source = " ".join(it["text"] for it in chosen)
+        print(f"■ 범위 {a}~{b}: {pdf.describe_range(items, a, b)} ({len(chosen)}쪽)")
+        for run in range(1, args.runs + 1):
+            for version, prompt, fix in versions:
+                for model in args.models:
+                    label = f"  {run}회 · {version} · {model}"
+                    try:
+                        quiz, r = run_once(prompt, text, source, model, a, b, fix)
+                    except Exception as e:
+                        print(f"{label}: 실패 ({str(e)[:60]})")
+                        continue
+                    results.setdefault((f"{a}-{b}", version, model), []).append(r)
+                    tag = {"이전 프롬프트": "old", "새 프롬프트": "new", "새+자동검사": "fixed"}[version]
+                    (out_dir / f"{stamp}-{a}-{b}-{run}-{tag}-{model}.json").write_text(json.dumps(quiz, ensure_ascii=False, indent=2), encoding="utf-8")
+                    iss = r["shape"]["issues"]
+                    extra = " · ".join(f"{k} {len(v)}" for k, v in iss.items() if v)
+                    fixinfo = ""
+                    if r["check"]:
+                        c = r["check"]
+                        fixinfo = f" (보기 고침 {c['fixed']} · 문제 바꿈 {c['rewritten']} · 뺌 {c['dropped']})"
+                    print(f"{label}: {r['sec']:.0f}초 · 엉뚱한 오답 {len(r['weak'])}/{r['total']}{fixinfo}" + (f" · {extra}" if extra else ""))
+                    for n, k, g, opt in r["weak"]:
+                        print(f"      Q{n} 보기{k} ({g:.0%}): {opt}")
+                    for k, v in iss.items():
+                        for x in v:
+                            print(f"      [{k}] {x}")
+        print(flush=True)
+
+    print("=" * 72)
+    print("엉뚱한 오답 = 내용 단어의 절반 미만이 강의 범위에 나오는 오답 보기")
+    print(f"{'범위':<8}{'버전':<12}{'엉뚱한 오답 (회차별)':<22}{'평균':>6}{'최악':>6}{'모양 실수':>10}{'시간':>7}")
+    summary = {}
+    for (rng, version, model), rs in results.items():
+        ws = [len(r["weak"]) for r in rs]
+        shape = sum(sum(len(v) for v in r["shape"]["issues"].values()) for r in rs)
+        sec = sum(r["sec"] for r in rs) / len(rs)
+        print(f"{rng:<8}{version:<12}{', '.join(map(str, ws)):<22}{sum(ws) / len(ws):>6.1f}{max(ws):>6}{shape:>10}{sec:>6.0f}초")
+        s = summary.setdefault(version, {"weak": [], "shape": 0, "pos": [0, 0, 0, 0]})
+        s["weak"] += ws
+        s["shape"] += shape
+        for r in rs:
+            s["pos"] = [x + y for x, y in zip(s["pos"], r["shape"]["positions"])]
+    print("-" * 72)
+    for version, s in summary.items():
+        n = len(s["weak"])
+        zero = sum(1 for w in s["weak"] if w == 0)
+        print(f"전체 {version}: 퀴즈 {n}개 · 엉뚱한 오답 평균 {sum(s['weak']) / n:.1f}개 · 0개인 퀴즈 {zero}/{n} · 모양 실수 {s['shape']} · 정답 위치 1~4번 {s['pos']}")
+    print(f"\n퀴즈 원본: {out_dir}")
 
 
 if __name__ == "__main__":
