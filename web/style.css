@@ -144,6 +144,9 @@ b.ok { color: var(--ok); } b.bad { color: var(--bad); }
 @media (max-width: 520px) { .chips-right { margin-left: 0; } }
 .actions.ruled { border-top: 1px solid var(--line); padding-top: 28px; }
 
+/* ---------- 복습 ---------- */
+.review-go { font-size: 16px; font-weight: 700; }
+
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
 .bar.wide { max-width: 1120px; padding: 0 40px; }
 main.wide { max-width: 1120px; padding: 80px 40px 112px; gap: 56px; }
