@@ -489,11 +489,11 @@ function renderNote(day, jump) {
     </section>`;
   };
 
-  if (store.style === "clean") app.innerHTML = noteCleanHTML(d, note, multi, sections, top, comps);
+  if (store.style === "clean") app.innerHTML = noteCleanHTML(d, note, multi, sections, top, comps, jump === "blank");
   else app.innerHTML = `<div class="note-page"><div class="note-wrap">
     <div class="note-top">
       <span class="muted">Day ${d.day} · ${esc(d.label)}</span>
-      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="pill" href="#/quiz/${d.day}">퀴즈 풀기 ✎</a></span>
+      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a>${jump === "blank" ? "" : `<a class="pill" href="#/note/${d.day}/blank">빈칸 모드</a>`}<a class="pill" href="#/quiz/${d.day}">퀴즈 풀기 ✎</a></span>
     </div>
     <header class="paper note-head">
       <div class="sub">Day ${d.day} · ${md(d.date)}</div>
@@ -528,7 +528,12 @@ function renderNote(day, jump) {
     e.preventDefault();
     document.getElementById(a.dataset.jump).scrollIntoView({ behavior: "smooth" });
   }));
-  if (jump && document.getElementById(jump)) {
+  if (jump === "blank") {
+    const wrap = app.querySelector(".note-wrap, .clean-wrap");
+    wrap.insertAdjacentHTML("afterbegin", blankBarHTML(d.day));
+    bindBlanks(applyBlanks(d.day, sections));
+  }
+  if (jump && jump !== "blank" && document.getElementById(jump)) {
     const target = document.getElementById(jump);
     requestAnimationFrame(() => target.scrollIntoView());
     target.style.outline = "3px solid #fff08a";
@@ -786,9 +791,90 @@ function renderQuiz(day) {
   }));
 }
 
+// ---------- 빈칸 모드 (#7) ----------
+// 정리본을 읽기만 하지 않고 핵심 단어를 가린 채 떠올려 보게 한다. 주소: #/note/1/blank
+// 가릴 단어: AI가 준 keywords + (예전 정리본이면) 단서표의 답, 퀴즈 개념 목록, 영어 용어, "23가지" 같은 숫자
+function blankWords(day, sec) {
+  const rec = dayRecord(day);
+  const words = new Set(arr(sec.keywords));
+  arr(sec.clues).forEach((c) => c.answer && String(c.answer).length <= 20 && words.add(String(c.answer)));
+  arr(rec.quiz && rec.quiz.concepts).forEach((c) => c.term && words.add(String(c.term)));
+  // 이 단원 퀴즈의 짧은 정답 (예전 정리본은 keywords가 없어서)
+  arr(rec.quiz && rec.quiz.questions).filter((q) => q.section === sec.title && q.type === "short").forEach((q) => q.answer_text && String(q.answer_text).length <= 15 && words.add(String(q.answer_text)));
+  const body = [sec.definition, ...arr(sec.key_points).map((k) => k.text), ...arr(sec.traps).map((t) => t.text), sec.so].filter(Boolean).join(" ");
+  (body.match(/[A-Za-z][A-Za-z]{2,}/g) || []).forEach((w) => words.add(w));
+  (body.match(/\d+\s?(가지|개|명|단계|종류)/g) || []).forEach((w) => words.add(w));
+  // 본문에 실제로 나오는 단어만, 긴 것부터 (짧은 단어가 긴 단어 안을 먼저 가리지 않게)
+  return [...words].map((w) => w.trim()).filter((w) => w.length >= 2 && body.includes(w)).sort((a, b) => b.length - a.length).slice(0, 8);
+}
+
+function applyBlanks(day, sections) {
+  let total = 0;
+  sections.forEach((sec, i) => {
+    const root = document.getElementById("s" + i);
+    if (!root) return;
+    const words = blankWords(day, sec);
+    if (!words.length) return;
+    const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+    // 제목·라벨·버튼·확인 질문 답은 그대로 두고 본문 글자만 바꾼다
+    const skip = "h2, .tape, .c-num, .c-page, th, button, .check-a, .explain-slot, .c-why b, .c-so b, .c-def b, .c-trap b, .c-analogy span";
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement.closest(skip) || !n.nodeValue.trim() ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      re.lastIndex = 0;
+      if (!re.test(text)) continue;
+      re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      while ((m = re.exec(text))) {
+        frag.append(text.slice(last, m.index));
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "blank"; b.dataset.word = m[0];
+        b.style.minWidth = `${Math.min(10, Math.max(3, m[0].length)) * 0.9}em`;
+        b.setAttribute("aria-label", "빈칸, 눌러서 정답 보기");
+        b.textContent = "　";
+        frag.append(b);
+        last = m.index + m[0].length;
+        total += 1;
+      }
+      frag.append(text.slice(last));
+      node.replaceWith(frag);
+    }
+  });
+  return total;
+}
+
+function bindBlanks(total) {
+  const bar = document.getElementById("blankbar");
+  if (!bar) return;
+  const count = () => {
+    const open = app.querySelectorAll(".blank.open").length;
+    document.getElementById("blankcount").textContent = total ? `빈칸 ${total}개 중 ${open}개 확인` : "이 정리본에는 가릴 단어가 없어요";
+  };
+  app.querySelectorAll(".blank").forEach((b) => b.addEventListener("click", () => {
+    b.classList.add("open"); b.textContent = b.dataset.word; b.removeAttribute("aria-label"); count();
+  }));
+  document.getElementById("blankall").addEventListener("click", () => {
+    app.querySelectorAll(".blank:not(.open)").forEach((b) => b.click());
+  });
+  count();
+}
+
+function blankBarHTML(day) {
+  return `<div class="blankbar" id="blankbar" role="status">
+    <b>빈칸으로 떠올리기</b><span id="blankcount"></span>
+    <span class="blankbar-actions"><button type="button" class="link" id="blankall">모두 보기</button>
+    <a href="#/note/${day}">빈칸 끄기</a><a href="#/quiz/${day}" style="font-weight:700">퀴즈로 확인 →</a></span>
+  </div>`;
+}
+
 // ---------- ④-2 정리본 (깔끔 스타일, #21) ----------
 // 필기 스타일과 같은 정리본 데이터를 참고서처럼: 단원 카드, "왜 → 그래서" 두 칸, 단서표, 함정, 서술형
-function noteCleanHTML(d, note, multi, sections, top, comps) {
+function noteCleanHTML(d, note, multi, sections, top, comps, blank = false) {
   const sec = (s, i) => {
     const pts = arr(s.key_points), traps = arr(s.traps), clues = arr(s.clues);
     const pr = pageRange(s.pages, multi);
@@ -821,7 +907,7 @@ function noteCleanHTML(d, note, multi, sections, top, comps) {
   return `<div class="clean-page"><div class="clean-wrap">
     <div class="note-top">
       <span class="muted">Day ${d.day} · ${esc(d.label)}</span>
-      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="c-btn strong" href="#/quiz/${d.day}">퀴즈 풀기</a></span>
+      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a>${blank ? "" : `<a class="c-btn" href="#/note/${d.day}/blank">빈칸 모드</a>`}<a class="c-btn strong" href="#/quiz/${d.day}">퀴즈 풀기</a></span>
     </div>
     <header class="c-header">
       <span class="c-eyebrow">Day ${d.day} · ${md(d.date)} · ${esc(d.label)}</span>
@@ -927,13 +1013,14 @@ function reviewSectionHTML(today) {
     const wrong = (rec.reviewWrong || rec.wrong || []).length;
     const late = r.due < today ? ` · <span style="color:var(--bad)">${diffDays(r.due, today)}일 밀림</span>` : "";
     return `<li><span class="grow">Day ${r.day} · ${esc(planOf(r.day).label)}</span>
-      <span class="hint">${r.gap}일 차${wrong ? ` · 틀린 문제 ${wrong}개` : ""}${late}</span></li>`;
+      <span class="hint">${r.gap}일 차${wrong ? ` · 틀린 문제 ${wrong}개` : ""}${late}</span>
+      <a href="#/note/${r.day}/blank" style="font-size:13px;white-space:nowrap">빈칸 ›</a></li>`;
   }).join("");
   return `<section class="section ruled">
     <h2 class="label">오늘 복습</h2>
     <ul class="rows" style="border-top:0">${rows}</ul>
     <div class="actions" style="margin-top:12px"><a href="#/review" class="review-go">복습 퀴즈 풀기 →</a>
-    <span class="hint">잊어버릴 때쯤 다시 풀면 오래 기억해요</span></div>
+    <span class="hint">먼저 "빈칸"으로 떠올려 보고 퀴즈로 확인하면 더 오래 기억해요</span></div>
   </section>`;
 }
 
