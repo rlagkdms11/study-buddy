@@ -192,7 +192,7 @@ function renderPlan() {
     </div>
   </main>`;
 
-  let plan = null, showAll = false;
+  let plan = null, showAll = false, finalDate = null;
   const startEl = document.getElementById("start");
   const examEl = document.getElementById("exam");
   const goBtn = document.getElementById("go");
@@ -207,7 +207,9 @@ function renderPlan() {
         <h2>${plan.length}일 · 하루 약 ${per}쪽</h2>
         ${plan.length > 7 ? `<button class="link" id="all" style="font-size:14px">${showAll ? "접기" : `전체 ${plan.length}일 보기`}</button>` : ""}
       </div>
-      <ol class="rows">${list.map((d) => `<li class="plan-row"><span class="when">Day ${d.day} · ${md(d.date)}</span><span>${esc(d.label)}</span></li>`).join("")}</ol>`;
+      <ol class="rows">${list.map((d) => `<li class="plan-row"><span class="when">Day ${d.day} · ${md(d.date)}</span><span>${esc(d.label)}</span></li>`).join("")}
+      ${finalDate && (showAll || plan.length <= 7) ? `<li class="plan-row"><span class="when">총정리 · ${md(finalDate)}</span><span><b>시험 전날</b> · 전체 요약본 + 전체 범위 퀴즈</span></li>` : ""}</ol>
+      ${finalDate ? `<p class="hint" style="margin:8px 0 0">시험 전날(${korDate(finalDate)})은 새 범위 없이 전체를 총정리해요</p>` : ""}`;
     const all = document.getElementById("all");
     if (all) all.addEventListener("click", () => { showAll = !showAll; drawDays(); });
   }
@@ -221,6 +223,7 @@ function renderPlan() {
         start_date: startEl.value, exam_date: examEl.value,
       });
       plan = res.days;
+      finalDate = res.final_date || null;
       drawDays();
       goBtn.disabled = false;
     } catch (e) {
@@ -237,6 +240,7 @@ function renderPlan() {
     store.examDate = examEl.value;
     store.style = document.querySelector('input[name="style"]:checked').value;
     store.plan = plan;
+    store.finalDate = finalDate;
     store.days = {};
     save(store);
     go("#/today");
@@ -267,6 +271,7 @@ function updateDay(day, patch) {
 function renderToday() {
   if (!store.plan) return redirect(store.pages ? "#/plan" : "#/upload");
   const today = ymd(new Date());
+  if (store.examDate && today >= finalDay()) return renderFinalToday(today);
   const i = todayIndex();
   const d = store.plan[i];
   const dday = diffDays(today, store.examDate);
@@ -768,33 +773,54 @@ function loadSession(today) {
   return sess;
 }
 
-function saveSession(patch) {
+function saveSession(key, patch) {
   store = load();
-  store.reviewSession = { ...store.reviewSession, ...patch };
+  store[key] = { ...store[key], ...patch };
   save(store);
-  return store.reviewSession;
+  return store[key];
 }
 
-function renderReview() {
-  if (!store.plan) return redirect("#/upload");
-  const today = ymd(new Date());
-  const sess = loadSession(today);
-  if (!sess || !sess.items.length) {
-    const next = upcomingReview(today);
-    app.innerHTML = `${navHeader("", true)}
-    <main class="wide two-col">
-      <div class="intro">
-        <span class="step">복습</span>
-        <h1 class="title hero">오늘은 복습할 게 없어요</h1>
-        <p class="lede">${next ? `다음 복습은 <b>${korDate(next.due)}</b> · Day ${next.day} ${next.gap}일 차예요.` : "퀴즈를 채점하면 1일, 3일, 7일 뒤에 복습이 잡혀요."}</p>
-        <p class="hint">잊어버릴 때쯤 다시 풀수록 오래 기억해요. 복습 퀴즈는 틀렸던 문제 위주로 나와요.</p>
-        <div class="actions" style="margin-top:12px"><a class="primary" href="#/today">오늘로</a></div>
-      </div>
-      <div class="panel">${scheduleHTML(today)}</div>
-    </main>`;
-    return;
-  }
+// 정리본에서 섹션 하나 찾기 (퀴즈 문제의 section 이름으로)
+function findSection(day, title) {
+  const secs = arr(dayRecord(day).note && dayRecord(day).note.sections);
+  const k = secs.findIndex((x) => x.title === title);
+  return k >= 0 ? { k, sec: secs[k] } : null;
+}
 
+// 채점 후 "다시 볼 개념": 틀린 문제의 섹션에서 핵심(★★ 이상)과 함정만 짧게
+function revisitHTML(wrongItems) {
+  // 같은 단원에서 많이 틀린 순서로, 최대 6개
+  const groups = new Map();
+  for (const it of wrongItems) {
+    const key = `${it.day}|${it.q.section}`;
+    const g = groups.get(key) || { day: it.day, section: it.q.section, n: 0 };
+    g.n += 1; groups.set(key, g);
+  }
+  const sorted = [...groups.values()].sort((a, b) => b.n - a.n || a.day - b.day);
+  const cards = [];
+  for (const g of sorted) {
+    if (cards.length >= 6) break;
+    const f = findSection(g.day, g.section);
+    if (!f) continue;
+    const pts = arr(f.sec.key_points).filter((x) => +x.importance >= 2).slice(0, 3);
+    const traps = arr(f.sec.traps).slice(0, 2);
+    cards.push(`<li class="revisit-card">
+      <div class="revisit-head"><b>${esc(f.sec.title)}</b><span class="hint">Day ${g.day} · ${g.n}문제 틀림</span></div>
+      ${pts.length ? `<ul>${pts.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : f.sec.definition ? `<p>${esc(f.sec.definition)}</p>` : ""}
+      ${traps.map((t) => `<p class="trap">주의: ${esc(t.text)}</p>`).join("")}
+      <a href="#/note/${g.day}/s${f.k}">정리본에서 보기 →</a>
+    </li>`);
+  }
+  if (!cards.length) return "";
+  const more = sorted.length - cards.length;
+  return `<section class="revisit"><h2>다시 볼 개념</h2><p class="hint" style="margin:0 0 12px">틀린 문제가 많이 나온 단원부터 핵심과 함정만 모았어요${more > 0 ? ` · 그 밖에 ${more}개 단원` : ""}</p><ul class="revisit-list">${cards.join("")}</ul></section>`;
+}
+
+// 복습 퀴즈와 총정리 퀴즈가 같이 쓰는 화면
+function renderSessionQuiz(mode) {
+  const today = ymd(new Date());
+  const key = mode.key;
+  const sess = store[key];
   const { items, graded } = sess;
   const answers = sess.answers || {};
   const right = (n) => isCorrect(items[n].q, answers[n]);
@@ -816,54 +842,55 @@ function renderReview() {
         const cls = correct ? "ok" : mine ? "bad" : "";
         return `<li class="opt done ${cls}"><span class="n">${v}</span><span class="grow">${esc(o)}</span>${correct ? '<span class="tag">정답</span>' : mine ? '<span class="tag">내 답</span>' : ""}</li>`;
       }).join("")}</ol>`;
-    const k = arr(dayRecord(it.day).note && dayRecord(it.day).note.sections).map((x) => x.title).indexOf(q.section);
+    const f = findSection(it.day, q.section);
     return `<article class="q ${graded ? (right(n) ? "is-ok" : "is-bad") : ""}">
       <span class="meta">Q${n + 1} · ${where}${graded ? ` · <b class="${right(n) ? "ok" : "bad"}">${right(n) ? "맞음" : "틀림"}</b>` : ""}</span>
       <h2>${esc(q.question)}</h2>
       ${q.code ? `<pre class="code">${esc(q.code)}</pre>` : ""}
       ${opts}
       ${graded ? `<div class="explain-box">${q.explanation ? `<span class="explain-label">해설</span><p class="explain">${esc(q.explanation)}</p>` : ""}
-        <div class="explain-foot"><a class="see-note" href="#/note/${it.day}${k >= 0 ? `/s${k}` : ""}">정리본에서 다시 보기 →</a></div></div>` : ""}
+        <div class="explain-foot"><a class="see-note" href="#/note/${it.day}${f ? `/s${f.k}` : ""}">정리본에서 다시 보기 →</a></div></div>` : ""}
     </article>`;
   };
 
   const groups = days.map((d) => {
     const mine = items.filter((it) => it.day === d);
-    return { day: d, gap: REVIEW_GAPS[mine[0].stage], n: mine.length, label: planOf(d).label };
+    return { day: d, n: mine.length, label: planOf(d).label, sub: mode.groupSub(mine[0]) };
   });
+  const wrongItems = graded ? items.filter((_, n) => !right(n)) : [];
   app.innerHTML = `${navHeader("", true)}
   <main class="wide">
     <div class="review-grid">
       <aside class="review-side">
-        <span class="step">복습 퀴즈</span>
+        <span class="step">${mode.step}</span>
         ${graded
           ? `<h1 class="title">${items.length}문제 중<br>${score}개 맞았어요</h1>
-             <span class="hint">${score === items.length ? "다 기억하고 있어요! 다음 복습 간격이 길어져요" : `틀린 ${items.length - score}문제는 다음 복습에 다시 나와요`}</span>`
-          : `<h1 class="title">잊기 전에<br>다시 풀어 봐요</h1>
+             <span class="hint">${mode.afterHint(score, items.length)}</span>`
+          : `<h1 class="title">${mode.title}</h1>
              <span class="hint" id="left"></span>
              <div class="progress" role="progressbar" aria-label="푼 문제" aria-valuemin="0" aria-valuemax="${items.length}" id="bar"><div style="width:0%"></div></div>`}
-        <ul class="review-days">${groups.map((g) => `<li><b>Day ${g.day} · ${g.gap}일 차</b><span>${esc(g.label)} · ${g.n}문제</span></li>`).join("")}</ul>
+        <ul class="review-days">${groups.map((g) => `<li><b>Day ${g.day}${g.sub ? ` · ${g.sub}` : ""}</b><span>${esc(g.label)} · ${g.n}문제</span></li>`).join("")}</ul>
         <div class="actions">
           ${graded ? `<a class="primary wide" href="#/today">오늘로 돌아가기</a>` : `<button class="primary wide" id="grade">채점하기</button>`}
         </div>
         <span id="qmsg" class="status" aria-live="polite"></span>
-        ${graded ? "" : `<p class="hint" style="margin:0">틀렸던 문제가 섞여 있어요. 보기 순서는 처음과 달라요.</p>`}
+        ${graded ? "" : `<p class="hint" style="margin:0">${mode.note}</p>`}
       </aside>
-      <div class="review-qs">${items.map(qHTML).join("")}</div>
+      <div class="review-qs">${graded ? revisitHTML(wrongItems) : ""}${items.map(qHTML).join("")}</div>
     </div>
   </main>`;
 
   const countLeft = () => {
     const el = document.getElementById("left");
     if (!el) return;
-    const a = (store.reviewSession || {}).answers || {};
+    const a = (store[key] || {}).answers || {};
     const left = items.filter((_, n) => a[n] === undefined || a[n] === "").length;
     el.textContent = left ? `${items.length}문제 중 ${items.length - left}문제 풀었어요` : "다 풀었어요. 채점해 볼까요?";
     const bar = document.querySelector("#bar div");
     if (bar) bar.style.width = `${((items.length - left) / items.length) * 100}%`;
   };
   countLeft();
-  const setAnswer = (n, v) => { saveSession({ answers: { ...(store.reviewSession.answers || {}), [n]: v } }); countLeft(); };
+  const setAnswer = (n, v) => { saveSession(key, { answers: { ...(store[key].answers || {}), [n]: v } }); countLeft(); };
   app.querySelectorAll('input[type="radio"][data-n]').forEach((r) => r.addEventListener("change", () => {
     r.closest(".opts").querySelectorAll(".opt").forEach((l) => l.classList.remove("picked"));
     r.closest(".opt").classList.add("picked");
@@ -873,28 +900,242 @@ function renderReview() {
 
   const grade = document.getElementById("grade");
   if (grade) grade.addEventListener("click", () => {
-    const a = store.reviewSession.answers || {};
+    const a = store[key].answers || {};
     const left = items.filter((_, n) => a[n] === undefined || a[n] === "").length;
     if (left && grade.dataset.sure !== "1") {
       document.getElementById("qmsg").textContent = `아직 ${left}문제를 안 풀었어요. 그대로 채점하려면 한 번 더 눌러 주세요.`;
       grade.dataset.sure = "1";
       return;
     }
-    // Day마다 복습 결과를 남기고, 이번에 틀린 문제를 다음 복습의 "틀린 문제"로 쓴다
     for (const day of days) {
       const mine = items.map((it, n) => ({ it, n })).filter((x) => x.it.day === day);
       const wrongNow = mine.filter((x) => !isCorrect(x.it.q, a[x.n])).map((x) => x.it.qi);
-      const rec = dayRecord(day);
-      const stage = mine[0].it.stage;
-      updateDay(day, {
-        reviews: { ...(rec.reviews || {}), [stage]: { date: today, score: mine.length - wrongNow.length, total: mine.length } },
-        reviewWrong: wrongNow,
-      });
+      mode.onGradeDay(day, mine, wrongNow, today);
     }
-    saveSession({ graded: true });
-    renderReview();
+    saveSession(key, { graded: true });
+    mode.rerender();
     window.scrollTo(0, 0);
   });
+}
+
+const REVIEW_MODE = {
+  key: "reviewSession",
+  step: "복습 퀴즈",
+  title: "잊기 전에<br>다시 풀어 봐요",
+  note: "틀렸던 문제가 섞여 있어요. 보기 순서는 처음과 달라요.",
+  groupSub: (it) => `${REVIEW_GAPS[it.stage]}일 차`,
+  afterHint: (score, total) => (score === total ? "다 기억하고 있어요! 다음 복습 간격이 길어져요" : `틀린 ${total - score}문제는 다음 복습에 다시 나와요`),
+  // Day마다 복습 결과를 남기고, 이번에 틀린 문제를 다음 복습의 "틀린 문제"로 쓴다
+  onGradeDay: (day, mine, wrongNow, today) => {
+    const rec = dayRecord(day);
+    const stage = mine[0].it.stage;
+    updateDay(day, {
+      reviews: { ...(rec.reviews || {}), [stage]: { date: today, score: mine.length - wrongNow.length, total: mine.length } },
+      reviewWrong: wrongNow,
+    });
+  },
+  rerender: () => renderReview(),
+};
+
+function renderReview() {
+  if (!store.plan) return redirect("#/upload");
+  const today = ymd(new Date());
+  const sess = loadSession(today);
+  if (!sess || !sess.items.length) {
+    const next = upcomingReview(today);
+    app.innerHTML = `${navHeader("", true)}
+    <main class="wide two-col">
+      <div class="intro">
+        <span class="step">복습</span>
+        <h1 class="title hero">오늘은 복습할 게 없어요</h1>
+        <p class="lede">${next ? `다음 복습은 <b>${korDate(next.due)}</b> · Day ${next.day} ${next.gap}일 차예요.` : "퀴즈를 채점하면 1일, 3일, 7일 뒤에 복습이 잡혀요."}</p>
+        <p class="hint">잊어버릴 때쯤 다시 풀수록 오래 기억해요. 복습 퀴즈는 틀렸던 문제 위주로 나와요.</p>
+        <div class="actions" style="margin-top:12px"><a class="primary" href="#/today">오늘로</a></div>
+      </div>
+      <div class="panel">${scheduleHTML(today)}</div>
+    </main>`;
+    return;
+  }
+  renderSessionQuiz(REVIEW_MODE);
+}
+
+// ---------- ⑦ 시험 전날 총정리 (#22) ----------
+// 시험 전날은 새 범위 없이: 전체 요약본(정리본에서 코드로 모음) → 전체 범위 퀴즈(틀린 문제 위주)
+const FINAL_MAX = 20;
+
+// 총정리 날
+// - 새 계획: 서버가 정해 준 날 (공부할 날이 하루뿐이면 null → 시험날에만 총정리 화면)
+// - 예전 계획(총정리 날 없이 시험 전날까지 범위가 있던 계획): 시험 전날로 본다
+function finalDay() {
+  if (store.finalDate === null) return store.examDate;
+  return store.finalDate || addDays(store.examDate, -1);
+}
+
+// 여러 번 틀리거나 "이해 안 돼요"를 누른 단원
+function weakConcepts() {
+  const m = new Map();
+  for (const p of store.plan) {
+    const r = dayRecord(p.day);
+    const qs = arr(r.quiz && r.quiz.questions);
+    const add = (qi, why) => {
+      const q = qs[qi];
+      if (!q || !q.section) return;
+      const key = `${p.day}|${q.section}`;
+      const e = m.get(key) || { day: p.day, section: q.section, count: 0, why: new Set() };
+      e.count += 1; e.why.add(why); m.set(key, e);
+    };
+    arr(r.wrong).forEach((qi) => add(qi, "퀴즈"));
+    arr(r.reviewWrong).forEach((qi) => add(qi, "복습"));
+    arr(r.finalWrong).forEach((qi) => add(qi, "총정리"));
+    Object.entries(r.flags || {}).forEach(([qi, k]) => k === "confused" && add(+qi, "이해 안 돼요"));
+  }
+  return [...m.values()].sort((a, b) => b.count - a.count);
+}
+
+function renderFinalToday(today) {
+  const examDay = today >= store.examDate;
+  const notDone = store.plan.filter((p) => !dayRecord(p.day).quizDone);
+  const weak = weakConcepts().slice(0, 6);
+  const fs = store.finalSession;
+  const quizState = fs && fs.date === today && fs.graded
+    ? `오늘 총정리 퀴즈 ${fs.items.length}문제 중 ${fs.items.filter((it, n) => isCorrect(it.q, (fs.answers || {})[n])).length}개 맞았어요`
+    : "";
+  app.innerHTML = `${navHeader("today", true)}
+  <main class="wide two-col">
+    <div class="intro">
+      <span class="step">${korDate(today)} · ${examDay ? "<b style='color:var(--accent)'>시험날</b>" : "총정리 · <b style='color:var(--accent)'>D-1</b>"}</span>
+      <h1 class="title hero">${examDay ? "오늘 시험이에요.<br>요약본만 한 번 훑어봐요" : "내일 시험이에요.<br>약한 것만 한 번 더 봐요"}</h1>
+      <p class="lede">${examDay ? "새로 외우기보다 표시해 둔 핵심과 함정만 확인해요." : "새 범위는 없어요. 전체 요약본으로 훑고, 지금까지 틀린 문제 위주로 전체 범위 퀴즈를 풀어요."}</p>
+      <div class="actions" style="margin-top:8px">
+        <a class="primary" href="#/final/summary">총정리 요약본 보기</a>
+        ${examDay ? "" : `<a href="#/final/quiz" style="font-size:16px;font-weight:500">전체 범위 퀴즈 풀기</a>`}
+      </div>
+      ${quizState ? `<p class="status"><span class="dot ok"></span>${quizState}</p>` : ""}
+    </div>
+    <div class="panel">
+      <section class="section">
+        <h2 style="font-size:17px">자주 막힌 개념</h2>
+        ${weak.length
+          ? `<ul class="rows">${weak.map((w) => {
+              const f = findSection(w.day, w.section);
+              return `<li><a class="grow" href="#/note/${w.day}${f ? `/s${f.k}` : ""}" style="color:var(--text)">${esc(w.section)}</a>
+                <span class="hint">Day ${w.day} · ${[...w.why].join("·")} ${w.count}번</span></li>`;
+            }).join("")}</ul>`
+          : `<p class="hint" style="margin:0">아직 틀린 문제가 없어요. 잘하고 있어요!</p>`}
+      </section>
+      ${notDone.length ? `<section class="section ruled">
+        <h2 class="label">아직 퀴즈를 안 푼 날</h2>
+        <ul class="rows" style="border-top:0">${notDone.map((p) => `<li><span class="grow">Day ${p.day} · ${esc(p.label)}</span>
+          <a href="#/note/${p.day}" style="font-size:14px">정리본</a><a href="#/quiz/${p.day}" style="font-size:14px">퀴즈</a></li>`).join("")}</ul>
+      </section>` : ""}
+    </div>
+  </main>`;
+}
+
+// 전체 요약본: 모든 Day 정리본에서 ★★ 이상 핵심, 함정, 서술형 한 문장만 모은다 (AI 없이)
+function renderFinalSummary() {
+  if (!store.plan) return redirect("#/upload");
+  const weakKeys = new Set(weakConcepts().map((w) => `${w.day}|${w.section}`));
+  const days = store.plan.map((p) => ({ p, note: dayRecord(p.day).note }));
+  const comps = days.flatMap(({ note }) => arr(note && note.review && note.review.comparisons));
+  let total = 0;
+  const dayHTML = ({ p, note }, i) => {
+    if (!note) return `<section class="paper unit" id="d${p.day}"><span class="tape" style="background:${TAPES[i % 3]}">Day ${p.day}</span>
+      <h2>${esc(p.label)}</h2><p class="lead">정리본을 아직 안 만들었어요. <a href="#/today">오늘 화면</a>에서 이 Day를 열면 만들어요.</p></section>`;
+    const secs = arr(note.sections).filter((x) => +x.importance >= 2 || weakKeys.has(`${p.day}|${x.title}`));
+    total += secs.length;
+    return `<section class="paper unit" id="d${p.day}">
+      <span class="tape" style="background:${TAPES[i % 3]}">Day ${p.day}</span>
+      <h2>${esc(note.title || p.label)}</h2>
+      <p class="lead">${esc(p.label)} · 중요한 단원 ${secs.length}개</p>
+      ${secs.map((x) => {
+        const f = findSection(p.day, x.title);
+        const pts = arr(x.key_points).filter((k) => +k.importance >= 3);
+        const show = pts.length ? pts : arr(x.key_points).filter((k) => +k.importance >= 2).slice(0, 2);
+        const weakMark = weakKeys.has(`${p.day}|${x.title}`) ? `<span class="weak-tag">틀린 적 있음</span>` : "";
+        return `<h3><a href="#/note/${p.day}${f ? `/s${f.k}` : ""}" style="text-decoration:none">${esc(x.title)}</a> <span class="stars">${stars(x.importance)}</span>${weakMark}</h3>
+          ${show.length ? `<ul>${show.map((k) => `<li><span class="u">${esc(k.text)}</span></li>`).join("")}</ul>` : ""}
+          ${arr(x.traps).map((t) => `<span class="red">↳ 주의! ${esc(t.text)}</span>`).join("")}
+          ${x.definition ? `<p class="memo" style="margin-top:6px">서술형 · ${esc(x.definition)}</p>` : ""}`;
+      }).join("")}
+    </section>`;
+  };
+  const body = days.map(dayHTML).join("");
+  app.innerHTML = `<div class="note-page"><div class="note-wrap">
+    <div class="note-top">
+      <span class="muted">총정리 요약본 · 시험 ${korDate(store.examDate)}</span>
+      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="pill" href="#/final/quiz">전체 퀴즈 ✎</a></span>
+    </div>
+    <header class="paper note-head">
+      <div class="sub">시험 전날 총정리</div>
+      <h1><span>한 장으로 보는 시험 범위</span></h1>
+      <p>Day ${store.plan.length}개 정리본에서 ★★ 이상 단원 ${total}개의 핵심과 함정만 모았어요. "틀린 적 있음"은 퀴즈나 복습에서 틀린 단원이에요.</p>
+    </header>
+    <nav class="note-chips" aria-label="Day 바로가기">
+      ${store.plan.map((p) => `<a href="#d${p.day}" data-jump="d${p.day}">Day ${p.day}</a>`).join("")}
+      ${comps.length ? `<a href="#cmp" data-jump="cmp">헷갈리는 쌍</a>` : ""}
+    </nav>
+    ${body}
+    ${comps.length ? `<section class="paper unit" id="cmp"><span class="tape" style="background:#ffd3de">헷갈리는 쌍</span>
+      ${comps.map((c) => `<h3>${esc(c.title)}</h3><div class="tbl"><table>
+        <tr>${arr(c.header).map((h) => `<th>${esc(h)}</th>`).join("")}</tr>
+        ${arr(c.rows).map((r) => `<tr>${arr(r).map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</table></div>`).join("")}</section>` : ""}
+    <div class="note-end">
+      <span class="hand" style="font-size:22px;color:#5d6880">다 훑었으면 전체 범위로 확인해 봐요!</span>
+      <a class="big-quiz" href="#/final/quiz">전체 범위 퀴즈 풀기 →</a>
+    </div>
+  </div></div>`;
+  app.querySelectorAll("[data-jump]").forEach((a) => a.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById(a.dataset.jump).scrollIntoView({ behavior: "smooth" });
+  }));
+}
+
+// 전체 범위 퀴즈: Day마다 틀린 문제를 먼저, 남는 자리는 맞힌 문제로. 최대 20문제
+function pickFinalQuestions() {
+  const days = store.plan.filter((p) => arr(dayRecord(p.day).quiz && dayRecord(p.day).quiz.questions).length);
+  if (!days.length) return [];
+  const per = Math.max(3, Math.ceil(FINAL_MAX / days.length));
+  const items = [];
+  for (const p of days) {
+    const r = dayRecord(p.day);
+    const qs = arr(r.quiz.questions);
+    const wrong = [...new Set([...arr(r.reviewWrong ?? r.wrong), ...arr(r.wrong)])].filter((i) => qs[i]);
+    const others = shuffleInPlace(qs.map((_, i) => i).filter((i) => !wrong.includes(i)));
+    for (const qi of [...wrong, ...others].slice(0, per)) items.push({ day: p.day, qi, q: shuffledCopy(qs[qi]) });
+  }
+  return items.slice(0, FINAL_MAX);
+}
+
+const FINAL_MODE = {
+  key: "finalSession",
+  step: "전체 범위 퀴즈",
+  title: "내일 시험 전에<br>전체를 확인해요",
+  note: "Day마다 틀렸던 문제가 먼저 나와요. 채점하면 틀린 단원을 '다시 볼 개념'으로 정리해 줘요.",
+  groupSub: () => "",
+  afterHint: (score, total) => (score === total ? "전 범위를 다 기억하고 있어요. 내일 잘 볼 거예요!" : `틀린 ${total - score}문제의 단원은 '다시 볼 개념'에서 한 번 더 봐요`),
+  onGradeDay: (day, mine, wrongNow, today) => {
+    updateDay(day, { finalWrong: wrongNow, finalScore: { date: today, score: mine.length - wrongNow.length, total: mine.length } });
+  },
+  rerender: () => renderFinalQuiz(),
+};
+
+function renderFinalQuiz() {
+  if (!store.plan) return redirect("#/upload");
+  const today = ymd(new Date());
+  let sess = store.finalSession;
+  if (!sess || sess.date !== today) {
+    const items = pickFinalQuestions();
+    if (!items.length) {
+      app.innerHTML = `${navHeader("")}<main><div class="head"><h1 class="title">아직 푼 퀴즈가 없어요</h1>
+        <span class="hint">Day별 퀴즈를 만들어야 전체 범위 퀴즈를 낼 수 있어요.</span></div>
+        <div class="actions"><a class="primary" href="#/today">오늘로</a></div></main>`;
+      return;
+    }
+    sess = { date: today, items, answers: {}, graded: false };
+    store = load(); store.finalSession = sess; save(store);
+  }
+  renderSessionQuiz(FINAL_MODE);
 }
 
 // ---------- 아직 만들지 않은 화면 ----------
@@ -919,6 +1160,7 @@ function route() {
   if (page === "note") return renderNote(arg, arg2);
   if (page === "quiz") return renderQuiz(arg);
   if (page === "review") return renderReview();
+  if (page === "final") return arg === "quiz" ? renderFinalQuiz() : renderFinalSummary();
   if (page === "history") return renderSoon("지난 공부");
   if (page === "settings") return renderSoon("설정");
   redirect(store.plan ? "#/today" : "#/upload");

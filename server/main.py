@@ -8,7 +8,7 @@
 """
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -91,13 +91,16 @@ async def upload_pdfs(files: list[UploadFile] = File(...)):
 def plan(req: PlanRequest):
     """시험일까지 하루 분량을 나누고, 각 날 범위를 '1강 8~10쪽'처럼 설명한다."""
     items = [p.model_dump() for p in req.pages]
-    days = make_plan(len(items), req.start_date, req.exam_date)
+    days = make_plan(len(items), req.start_date, req.exam_date, reserve_final=True)
     if not days:
         raise HTTPException(400, "시험일은 공부 시작일보다 뒤로 골라 주세요.")
     for d in days:
         d["count"] = d["end"] - d["start"] + 1
         d["label"] = pdf.describe_range(items, d["start"], d["end"])
-    return {"days": days}
+    # 시험 전날은 새 범위 없이 총정리 (공부할 날이 이틀 이상일 때만)
+    final = req.exam_date - timedelta(days=1)
+    final_date = final if (req.exam_date - req.start_date).days >= 2 and final > days[-1]["date"] else None
+    return {"days": days, "final_date": final_date}
 
 
 def run_ai(prompt: str, what: str):
