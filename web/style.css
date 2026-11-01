@@ -182,6 +182,45 @@ b.ok { color: var(--ok); } b.bad { color: var(--bad); }
 .revisit-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .weak-tag { font-family: 'Noto Sans KR', sans-serif; font-size: 12px; font-weight: 700; color: #b42318; background: #fdeeec; border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: 3px; }
 
+/* ---------- 지난 공부 · 설정 ---------- */
+.stats { margin: 4px 0 0; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.stats div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; font-weight: 500; }
+.hist-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.hist-row { display: flex; justify-content: space-between; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.hist-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.hist-main b { font-size: 16px; font-weight: 500; }
+.hist-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: 14px; white-space: nowrap; }
+.hist-links { display: flex; gap: 14px; }
+.muted-row .hist-main b { color: var(--muted); }
+.chips-s { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.chip-s { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #f1f3f6; color: var(--muted); }
+.chip-s.done { background: var(--ok-bg); color: var(--ok); font-weight: 500; }
+.chip-s.late { background: var(--bad-bg); color: var(--bad); }
+.chip-s.after { color: #b0b5bd; }
+.settings { display: flex; flex-direction: column; gap: 40px; }
+.settings section { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 24px; }
+.settings section:first-child { border-top: 0; padding-top: 0; }
+.settings h2 { font-size: 17px; }
+.settings .hint { margin: 0; line-height: 1.7; }
+.set-row { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; cursor: pointer; }
+.set-row input { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); }
+.set-row > span { display: flex; flex-direction: column; gap: 2px; }
+.set-row.disabled { cursor: default; opacity: .6; }
+.soon { font-size: 12px; font-weight: 500; color: var(--muted); background: #f1f3f6; border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+.set-inline { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.set-inline label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+.set-inline input[type="date"] { font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--input); border-radius: 10px; color: var(--text); }
+.secondary { font: inherit; font-size: 15px; font-weight: 500; padding: 11px 18px; border-radius: 10px; border: 1px solid var(--input); background: #fff; color: var(--text); cursor: pointer; }
+.secondary:hover { border-color: #b9c0ca; }
+.secondary:disabled { opacity: .5; cursor: not-allowed; }
+.file-btn { position: relative; flex-direction: row !important; font-size: 15px !important; color: var(--text) !important; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.settings .link { align-self: flex-start; font-size: 14px; }
+.link.danger { color: var(--bad); }
+@media (max-width: 520px) { .hist-row { flex-direction: column; gap: 8px; } .hist-side { align-items: flex-start; } }
+
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
 .bar.wide { max-width: 1120px; padding: 0 40px; }
 main.wide { max-width: 1120px; padding: 80px 40px 112px; gap: 56px; }
