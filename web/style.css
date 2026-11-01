@@ -162,6 +162,14 @@ main { max-width: 680px; margin: 0 auto; padding: 48px 24px 80px; display: flex;
 .c-cta a { font-size: 16px; font-weight: 700; padding: 14px 24px; border-radius: 10px; background: #fff; color: var(--teal) !important; }
 @media (max-width: 600px) { .c-card { padding: 22px 18px; } .c-whyso { grid-template-columns: 1fr; } .c-header h1 { font-size: 28px; } }
 
+/* ---------- 이해 안 돼요 (#4) ---------- */
+.red-btn { border-color: #d93a55 !important; color: #d93a55 !important; }
+.explain-slot { margin-top: 12px; }
+.explain-card { background: #fff; border: 1px solid #e3e6ea; border-left: 3px solid #2563eb; border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; font-family: 'Noto Sans KR', sans-serif; color: #16181d; }
+.ex-title { font-size: 13px; font-weight: 700; color: #2563eb; }
+.ex-row b { display: block; font-size: 12px; font-weight: 500; color: #5c6370; margin-bottom: 2px; }
+.ex-row p { margin: 0; font-size: 15px; line-height: 1.7; }
+
 /* ---------- 퀴즈 ---------- */
 .q { display: flex; flex-direction: column; gap: 14px; border-top: 1px solid var(--line); padding-top: 28px; scroll-margin-top: 16px; }
 .q h2 { font-size: 18px; line-height: 1.6; font-weight: 500; letter-spacing: 0; }

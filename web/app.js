@@ -480,9 +480,12 @@ function renderNote(day, jump) {
         ${clues.map((c) => `<tr><td>${esc(c.clue)}</td><td>${esc(c.answer)}</td></tr>`).join("")}</table></div>` : ""}
       ${s.definition ? `<h3><b style="background:linear-gradient(transparent 55%, #ffd3de 55%)">서술형 한 문장</b></h3><p><span class="u">${esc(s.definition)}</span></p>` : ""}
       ${s.analogy ? `<div class="memo">비유 (자료 밖 설명) · ${esc(s.analogy)}</div>` : ""}
-      ${s.check && s.check.q ? `<div style="margin-top:12px">
-        <button type="button" class="hand-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>
-        <div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<span class="red">A. ${esc(s.check.a)}</span></div></div>` : ""}
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        ${s.check && s.check.q ? `<button type="button" class="hand-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>` : ""}
+        <button type="button" class="hand-btn red-btn" data-explain="${i}">이해 안 돼요</button>
+      </div>
+      ${s.check && s.check.q ? `<div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<span class="red">A. ${esc(s.check.a)}</span></div>` : ""}
+      <div class="explain-slot" id="e${i}" ${dayRecord(d.day).explains && dayRecord(d.day).explains[`s:${s.title}`] ? "" : "hidden"}>${dayRecord(d.day).explains && dayRecord(d.day).explains[`s:${s.title}`] ? explainHTML(dayRecord(d.day).explains[`s:${s.title}`]) : ""}</div>
     </section>`;
   };
 
@@ -537,6 +540,48 @@ function renderNote(day, jump) {
     b.setAttribute("aria-expanded", String(!box.hidden));
     b.textContent = box.hidden ? "확인 질문 보기" : "확인 질문 접기";
   }));
+  app.querySelectorAll("[data-explain]").forEach((b) => b.addEventListener("click", () => {
+    const i = +b.dataset.explain;
+    requestExplain(d.day, `s:${sections[i].title}`, sections[i], {}, document.getElementById("e" + i));
+  }));
+}
+
+// ---------- "이해 안 돼요" 쉬운 설명 (#4) ----------
+// 단원 근거 쪽의 PDF 글자만 보내서 더 쉽게 다시 설명받는다. 받은 설명은 Day 기록에 저장해 다시 부르지 않는다
+function explainHTML(ex) {
+  const row = (label, text) => (text ? `<div class="ex-row"><b>${label}</b><p>${esc(text)}</p></div>` : "");
+  return `<div class="explain-card">
+    <span class="ex-title">쉽게 다시 설명</span>
+    ${row("쉽게 말하면", ex.easy)}${row("예를 들면", ex.example)}${row("비유 (자료 밖)", ex.analogy)}${row("헷갈리면", ex.confusion)}${row("시험에서는", ex.point)}
+  </div>`;
+}
+
+const explaining = {};
+async function requestExplain(day, key, sec, extra, box) {
+  const rec = dayRecord(day);
+  if (rec.explains && rec.explains[key]) { box.innerHTML = explainHTML(rec.explains[key]); box.hidden = false; return; }
+  if (explaining[`${day}|${key}`]) return;
+  explaining[`${day}|${key}`] = true;
+  box.hidden = false;
+  box.innerHTML = `<p class="status"><span class="dot busy"></span>쉽게 다시 설명하는 중이에요 · 10초쯤</p>`;
+  const d = planOf(day);
+  // 단원 근거 쪽만 (없으면 그날 범위 전체)
+  const nums = arr(sec.pages).filter((n) => n >= d.start && n <= d.end);
+  const pages = nums.length ? nums.map((n) => store.pages[n - 1]) : store.pages.slice(d.start - 1, d.end);
+  const first = nums.length ? nums[0] : d.start;
+  try {
+    const res = await postJSON("/api/explain", { pages, first, section: sec, ...extra });
+    const r = dayRecord(day);
+    updateDay(day, {
+      explains: { ...(r.explains || {}), [key]: res.explain },
+      confusedSections: [...new Set([...arr(r.confusedSections), sec.title])],
+    });
+    box.innerHTML = explainHTML(res.explain);
+  } catch (e) {
+    box.innerHTML = `<p class="status"><span class="dot bad"></span>${esc(e.message)}</p>`;
+  } finally {
+    delete explaining[`${day}|${key}`];
+  }
 }
 
 // ---------- ⑥ 퀴즈 ----------
@@ -609,11 +654,12 @@ function renderQuiz(day) {
         <div class="explain-foot">
           <a class="see-note" href="${sectionLink(q)}">정리본${pageRange(q.pages, multi) ? ` ${esc(pageRange(q.pages, multi))}` : ""}에서 다시 보기 →</a>
           <span class="chips-right">
-            <!-- "이해 안 돼요"는 #4 설명 기능을 만들 때 다시 넣는다 (지금은 눌러도 하는 일이 없어서 숨김) -->
+            <button type="button" class="chip ${flags[i] === "confused" ? "on" : ""}" data-explain-q="${i}">${flags[i] === "confused" ? "✓ " : ""}이해 안 돼요</button>
             <button type="button" class="chip ${flags[i] === "wrong" ? "on" : ""}" data-flag="${i}" data-kind="wrong" aria-pressed="${flags[i] === "wrong"}">${flags[i] === "wrong" ? "✓ 신고함" : "정답이 이상해요"}</button>
           </span>
         </div>
-      </div>` : ""}
+      </div>
+      <div class="explain-slot" id="qe${i}" ${rec.explains && rec.explains[`q:${i}`] ? "" : "hidden"}>${rec.explains && rec.explains[`q:${i}`] ? explainHTML(rec.explains[`q:${i}`]) : ""}</div>` : ""}
     </article>`;
   };
 
@@ -717,6 +763,18 @@ function renderQuiz(day) {
     renderQuiz(d.day);
   }));
 
+  app.querySelectorAll("[data-explain-q]").forEach((b) => b.addEventListener("click", () => {
+    const i = +b.dataset.explainQ;
+    const q = qs[i];
+    const r = dayRecord(d.day);
+    updateDay(d.day, { flags: { ...(r.flags || {}), [i]: "confused" } });
+    b.classList.add("on"); b.textContent = "✓ 이해 안 돼요";
+    const f = findSection(d.day, q.section);
+    const sec = f ? f.sec : { title: q.section || "", pages: q.pages };
+    const correct = q.type === "choice" ? arr(q.options)[+q.answer_index - 1] : q.answer_text;
+    const mine = q.type === "choice" ? arr(q.options)[+(r.answers || {})[i] - 1] : (r.answers || {})[i];
+    requestExplain(d.day, `q:${i}`, sec, { question: q.question, answer: correct || "", my_answer: mine || "" }, document.getElementById("qe" + i));
+  }));
   app.querySelectorAll("[data-flag]").forEach((b) => b.addEventListener("click", () => {
     const r = dayRecord(d.day);
     const f = { ...(r.flags || {}) };
@@ -750,10 +808,14 @@ function noteCleanHTML(d, note, multi, sections, top, comps) {
         <tbody>${clues.map((c) => `<tr><td>${esc(c.clue)}</td><td class="c-ans">${esc(c.answer)}</td></tr>`).join("")}</tbody></table>` : ""}
       ${traps.map((t) => `<p class="c-trap"><b>함정</b>${esc(t.text)}</p>`).join("")}
       ${s.definition ? `<p class="c-def"><b>서술형 한 문장</b>${esc(s.definition)}</p>` : ""}
-      ${s.check && s.check.q ? `<div class="c-foot">
-        <button type="button" class="c-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>
-        <div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<br><b style="color:var(--teal)">A.</b> ${esc(s.check.a)}</div>
-      </div>` : ""}
+      <div class="c-foot">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${s.check && s.check.q ? `<button type="button" class="c-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>` : ""}
+          <button type="button" class="c-btn strong" data-explain="${i}">이해 안 돼요</button>
+        </div>
+        ${s.check && s.check.q ? `<div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<br><b style="color:var(--teal)">A.</b> ${esc(s.check.a)}</div>` : ""}
+        <div class="explain-slot" id="e${i}" ${dayRecord(d.day).explains && dayRecord(d.day).explains[`s:${s.title}`] ? "" : "hidden"}>${dayRecord(d.day).explains && dayRecord(d.day).explains[`s:${s.title}`] ? explainHTML(dayRecord(d.day).explains[`s:${s.title}`]) : ""}</div>
+      </div>
     </section>`;
   };
   return `<div class="clean-page"><div class="clean-wrap">
@@ -1131,6 +1193,13 @@ function weakConcepts() {
     arr(r.reviewWrong).forEach((qi) => add(qi, "복습"));
     arr(r.finalWrong).forEach((qi) => add(qi, "총정리"));
     Object.entries(r.flags || {}).forEach(([qi, k]) => k === "confused" && add(+qi, "이해 안 돼요"));
+    // 정리본에서 "이해 안 돼요"를 누른 단원
+    for (const title of arr(r.confusedSections)) {
+      const key = `${p.day}|${title}`;
+      const e = m.get(key) || { day: p.day, section: title, count: 0, why: new Set() };
+      if (!e.why.has("이해 안 돼요")) { e.count += 1; e.why.add("이해 안 돼요"); }
+      m.set(key, e);
+    }
   }
   return [...m.values()].sort((a, b) => b.count - a.count);
 }

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from core import pdf
 from core.ai import ask_ai
 from core.plan import make_plan
-from core.prompts import note_prompt, quiz_prompt
+from core.prompts import explain_prompt, note_prompt, quiz_prompt
 from core.quiz_check import check_and_fix, shuffle_options
 
 log = logging.getLogger("study-buddy")
@@ -50,6 +50,13 @@ class NoteRequest(BaseModel):
 
 class QuizRequest(NoteRequest):
     sections: list[str] = []
+
+
+class ExplainRequest(NoteRequest):
+    section: dict
+    question: str = ""
+    answer: str = ""
+    my_answer: str = ""
 
 
 # ---------- API ----------
@@ -140,6 +147,14 @@ def quiz(req: QuizRequest):
     check["seconds"] = round(time.perf_counter() - start, 1)
     print(f"[퀴즈 검사] 근거 약한 보기 {check['weak_before']}개 → 보기 고침 {check['fixed']} · 문제 바꿈 {check['rewritten']} · 뺌 {check['dropped']} → 남음 {check['weak_after']}개 ({check['seconds']}초)")
     return {"quiz": result, "elapsed": round(elapsed + check["seconds"], 1), "check": check}
+
+
+@app.post("/api/explain")
+def explain(req: ExplainRequest):
+    """'이해 안 돼요': 단원(과 틀린 문제)을 더 쉽게 다시 설명한다."""
+    text = pdf.build_pdf_text([p.model_dump() for p in req.pages], first=req.first)
+    result, elapsed = run_ai(explain_prompt(req.section, text, req.question, req.answer, req.my_answer), "설명")
+    return {"explain": result, "elapsed": elapsed}
 
 
 # ---------- 화면 ----------
