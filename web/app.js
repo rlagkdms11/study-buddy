@@ -48,9 +48,9 @@ const postJSON = (path, data) => api(path, { method: "POST", headers: { "Content
 
 const GEAR = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5c6370" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>`;
 
-function navHeader(current) {
+function navHeader(current, wide = false) {
   const tab = (href, name, key) => `<a href="${href}" ${current === key ? 'aria-current="page"' : ""}>${name}</a>`;
-  return `<header class="top"><div class="bar">
+  return `<header class="top"><div class="bar${wide ? " wide" : ""}">
     <span class="logo">study-buddy</span>
     <nav class="tabs" aria-label="메뉴">${tab("#/today", "오늘", "today")}${tab("#/history", "지난 공부", "history")}</nav>
     <a class="icon-btn" href="#/settings" aria-label="설정">${GEAR}</a>
@@ -670,6 +670,40 @@ function upcomingReview(today) {
 
 function planOf(day) { return store.plan.find((p) => p.day === +day); }
 
+// Day마다 1·3·7일 차 복습이 언제인지. 끝난 건 그 날짜, 아직이면 예정일(앞 복습을 제때 한다고 보고 계산)
+function reviewSchedule(day) {
+  const r = dayRecord(day);
+  if (!r.quizDone || !r.gradedAt) return null;
+  const done = r.reviews || {};
+  let base = r.gradedAt;
+  return REVIEW_GAPS.map((gap, k) => {
+    if (done[k]) { base = done[k].date; return { gap, state: "done", date: done[k].date, score: done[k] }; }
+    const due = addDays(base, gap - (k ? REVIEW_GAPS[k - 1] : 0));
+    base = due;
+    if (store.examDate && due > store.examDate) return { gap, state: "after", date: due };
+    return { gap, state: "todo", date: due };
+  });
+}
+
+function scheduleHTML(today) {
+  const days = store.plan.filter((p) => reviewSchedule(p.day));
+  if (!days.length) return `<section class="section"><h2 style="font-size:17px">복습 일정</h2>
+    <p class="hint" style="margin:0">아직 채점한 퀴즈가 없어요. 오늘 퀴즈를 풀면 여기에 일정이 생겨요.</p></section>`;
+  const cell = (c) => {
+    if (c.state === "done") return `<span class="sched done">✓ ${md(c.date)}<small>${c.score.score}/${c.score.total}</small></span>`;
+    if (c.state === "after") return `<span class="sched after">시험 뒤</span>`;
+    const cls = c.date < today ? "late" : c.date === today ? "now" : "";
+    return `<span class="sched ${cls}">${c.date === today ? "오늘" : md(c.date)}</span>`;
+  };
+  return `<section class="section">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="font-size:17px">복습 일정</h2><span class="hint">시험 ${korDate(store.examDate)}</span></div>
+    <table class="sched-table">
+      <thead><tr><th scope="col">공부한 날</th>${REVIEW_GAPS.map((g) => `<th scope="col">${g}일 차</th>`).join("")}</tr></thead>
+      <tbody>${days.map((p) => `<tr><th scope="row"><b>Day ${p.day}</b><span>${esc(p.label)}</span></th>${reviewSchedule(p.day).map((c) => `<td>${cell(c)}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table>
+  </section>`;
+}
+
 function reviewSectionHTML(today) {
   const due = reviewsDue(today);
   if (!due.length) {
@@ -747,10 +781,17 @@ function renderReview() {
   const sess = loadSession(today);
   if (!sess || !sess.items.length) {
     const next = upcomingReview(today);
-    app.innerHTML = `${navHeader("")}
-    <main><div class="head"><h1 class="title">오늘은 복습할 게 없어요</h1>
-    <span class="hint">${next ? `다음 복습은 ${korDate(next.due)} · Day ${next.day} ${next.gap}일 차예요` : "퀴즈를 풀면 1일, 3일, 7일 뒤에 복습이 잡혀요"}</span></div>
-    <div class="actions"><a class="primary" href="#/today">오늘로</a></div></main>`;
+    app.innerHTML = `${navHeader("", true)}
+    <main class="wide two-col">
+      <div class="intro">
+        <span class="step">복습</span>
+        <h1 class="title hero">오늘은 복습할 게 없어요</h1>
+        <p class="lede">${next ? `다음 복습은 <b>${korDate(next.due)}</b> · Day ${next.day} ${next.gap}일 차예요.` : "퀴즈를 채점하면 1일, 3일, 7일 뒤에 복습이 잡혀요."}</p>
+        <p class="hint">잊어버릴 때쯤 다시 풀수록 오래 기억해요. 복습 퀴즈는 틀렸던 문제 위주로 나와요.</p>
+        <div class="actions" style="margin-top:12px"><a class="primary" href="#/today">오늘로</a></div>
+      </div>
+      <div class="panel">${scheduleHTML(today)}</div>
+    </main>`;
     return;
   }
 
@@ -786,22 +827,29 @@ function renderReview() {
     </article>`;
   };
 
-  const stageText = [...new Set(items.map((it) => `Day ${it.day} ${REVIEW_GAPS[it.stage]}일 차`))].join(", ");
-  app.innerHTML = `
-  <header><div class="bar split"><a href="#/today" style="font-size:14px">← 오늘로</a><span class="hint">${esc(stageText)}</span></div></header>
-  <main>
-    <div class="head" style="gap:6px">
-      <span class="meta">복습 퀴즈 · ${days.map((d) => `Day ${d}`).join(", ")}</span>
-      ${graded
-        ? `<h1 class="title">${items.length}문제 중 ${score}개 맞았어요</h1>
-           <span class="hint">${score === items.length ? "다 기억하고 있어요! 다음 복습 간격이 길어져요" : `틀린 ${items.length - score}문제는 다음 복습에 다시 나와요`}</span>`
-        : `<h1 class="title">잊기 전에 다시 풀어 봐요</h1>
-           <span class="hint" id="left"></span>`}
-    </div>
-    ${items.map(qHTML).join("")}
-    <div class="actions ruled">
-      ${graded ? `<a class="primary" href="#/today">오늘로 돌아가기</a>` : `<button class="primary" id="grade">채점하기</button>`}
-      <span id="qmsg" class="status" aria-live="polite"></span>
+  const groups = days.map((d) => {
+    const mine = items.filter((it) => it.day === d);
+    return { day: d, gap: REVIEW_GAPS[mine[0].stage], n: mine.length, label: planOf(d).label };
+  });
+  app.innerHTML = `${navHeader("", true)}
+  <main class="wide">
+    <div class="review-grid">
+      <aside class="review-side">
+        <span class="step">복습 퀴즈</span>
+        ${graded
+          ? `<h1 class="title">${items.length}문제 중<br>${score}개 맞았어요</h1>
+             <span class="hint">${score === items.length ? "다 기억하고 있어요! 다음 복습 간격이 길어져요" : `틀린 ${items.length - score}문제는 다음 복습에 다시 나와요`}</span>`
+          : `<h1 class="title">잊기 전에<br>다시 풀어 봐요</h1>
+             <span class="hint" id="left"></span>
+             <div class="progress" role="progressbar" aria-label="푼 문제" aria-valuemin="0" aria-valuemax="${items.length}" id="bar"><div style="width:0%"></div></div>`}
+        <ul class="review-days">${groups.map((g) => `<li><b>Day ${g.day} · ${g.gap}일 차</b><span>${esc(g.label)} · ${g.n}문제</span></li>`).join("")}</ul>
+        <div class="actions">
+          ${graded ? `<a class="primary wide" href="#/today">오늘로 돌아가기</a>` : `<button class="primary wide" id="grade">채점하기</button>`}
+        </div>
+        <span id="qmsg" class="status" aria-live="polite"></span>
+        ${graded ? "" : `<p class="hint" style="margin:0">틀렸던 문제가 섞여 있어요. 보기 순서는 처음과 달라요.</p>`}
+      </aside>
+      <div class="review-qs">${items.map(qHTML).join("")}</div>
     </div>
   </main>`;
 
@@ -810,7 +858,9 @@ function renderReview() {
     if (!el) return;
     const a = (store.reviewSession || {}).answers || {};
     const left = items.filter((_, n) => a[n] === undefined || a[n] === "").length;
-    el.textContent = left ? `${items.length}문제 · ${left}문제 남았어요 · 틀렸던 문제가 섞여 있어요` : "다 풀었어요. 채점해 볼까요?";
+    el.textContent = left ? `${items.length}문제 중 ${items.length - left}문제 풀었어요` : "다 풀었어요. 채점해 볼까요?";
+    const bar = document.querySelector("#bar div");
+    if (bar) bar.style.width = `${((items.length - left) / items.length) * 100}%`;
   };
   countLeft();
   const setAnswer = (n, v) => { saveSession({ answers: { ...(store.reviewSession.answers || {}), [n]: v } }); countLeft(); };
