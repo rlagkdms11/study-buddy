@@ -278,58 +278,157 @@ function renderToday() {
   const done = Object.values(store.days).filter((r) => r.quizDone).length;
   const before = today < store.plan[0].date;
 
-  app.innerHTML = `${navHeader("today")}
-  <main>
-    <section class="section" style="gap:24px">
-      <div class="head" style="gap:10px">
-        <span class="meta">${korDate(today)} · Day ${d.day} / ${store.plan.length} · <b style="color:var(--accent)">D-${dday}</b></span>
-        <h1 class="title big">${esc(d.label).replace(", ", ",<br>")}</h1>
-        ${before ? `<span class="hint">${korDate(d.date)}부터 시작하는 범위예요</span>` : ""}
-      </div>
-      <div class="progress" role="progressbar" aria-label="학습 진행" aria-valuemin="0" aria-valuemax="${store.plan.length}" aria-valuenow="${done}"><div style="width:${(done / store.plan.length) * 100}%"></div></div>
-      <div class="actions">
-        <a class="primary" href="#/note/${d.day}">정리본 보기</a>
-        <a href="#/quiz/${d.day}" style="font-size:16px;font-weight:500">퀴즈 풀기</a>
-      </div>
-      <div id="prep" class="status" aria-live="polite"></div>
-    </section>
-    ${reviewSectionHTML(today)}
+  // 오른쪽: 오늘 복습이 있으면 복습 목록, 없으면 복습 일정표
+  const side = reviewsDue(today).length ? reviewSectionHTML(today) : scheduleHTML(today);
+  app.innerHTML = `${navHeader("today", true)}
+  <main class="wide today-main">
+    ${missedBannerHTML(today)}
+    <div class="two-col">
+      <section class="intro" style="gap:24px">
+        <div class="head" style="gap:10px">
+          <span class="meta">${korDate(today)} · Day ${d.day} / ${store.plan.length} · <b style="color:var(--accent)">D-${dday}</b></span>
+          <h1 class="title hero">${esc(d.label).replace(", ", ",<br>")}</h1>
+          ${before ? `<span class="hint">${korDate(d.date)}부터 시작하는 범위예요</span>` : ""}
+        </div>
+        <div class="progress" role="progressbar" aria-label="학습 진행" aria-valuemin="0" aria-valuemax="${store.plan.length}" aria-valuenow="${done}"><div style="width:${(done / store.plan.length) * 100}%"></div></div>
+        <span class="hint" style="margin-top:-12px">${store.plan.length}일 중 ${done}일 완료${store.finalDate ? ` · 총정리 ${md(store.finalDate)}` : ""}</span>
+        <div class="actions">
+          <a class="primary" href="#/note/${d.day}">정리본 보기</a>
+          <a href="#/quiz/${d.day}" style="font-size:16px;font-weight:500">퀴즈 풀기</a>
+        </div>
+        <div id="prep" class="status" aria-live="polite" data-day="${d.day}"></div>
+      </section>
+      <div class="panel today-side">${side}</div>
+    </div>
   </main>`;
 
+  bindMissedBanner(today);
   prepare(d);
 }
 
 // 오늘 화면을 열면 정리본 → 퀴즈 순서로 미리 만들어 둔다
-const preparing = {};
-async function prepare(d) {
+// prepState[day] = { stage: "note" | "quiz" | "error", started, error, retryAt, retried }
+const prepState = {};
+const AUTO_RETRY_SEC = 60;
+
+function prepNotify(day) {
+  const st = prepState[day];
+  const el = document.getElementById("prep");
+  if (el && +el.dataset.day === +day) {
+    const rec = dayRecord(day);
+    if (rec.note && rec.quiz) el.innerHTML = `<span class="dot ok"></span>정리본과 퀴즈가 준비됐어요`;
+    else if (st && st.stage === "error") {
+      el.innerHTML = `<span class="dot bad"></span>${esc(st.error)} <button class="link" id="retry">다시 시도</button>`;
+      document.getElementById("retry").addEventListener("click", () => prepare(planOf(day), true));
+    } else if (st) el.innerHTML = `<span class="dot busy"></span>${st.stage === "note" ? "정리본을 만드는 중이에요" : "정리본 완성 · 퀴즈를 만드는 중이에요"}`;
+  }
+  // 정리본·퀴즈 화면에서 기다리는 중이었다면 다시 그린다
+  const [, page, arg] = location.hash.split("/");
+  if ((page === "note" || page === "quiz") && +arg === +day && document.querySelector(".prep-view")) route();
+}
+
+async function prepare(d, manual = false) {
   let rec = dayRecord(d.day);
-  const show = (cls, text) => {
-    const el = document.getElementById("prep");
-    if (el) el.innerHTML = `<span class="dot ${cls}"></span>${text}`;
-  };
-  if (rec.note && rec.quiz) return show("ok", "정리본과 퀴즈가 준비됐어요");
-  if (preparing[d.day]) return show("busy", "정리본과 퀴즈를 만드는 중이에요 · 1~2분");
-  preparing[d.day] = true;
+  if (rec.note && rec.quiz) { delete prepState[d.day]; return prepNotify(d.day); }
+  const cur = prepState[d.day];
+  if (cur && cur.stage !== "error") return prepNotify(d.day);
+  if (cur && cur.stage === "error" && !manual) return prepNotify(d.day);
   const body = { pages: store.pages.slice(d.start - 1, d.end), first: d.start };
+  const retried = cur ? cur.retried : false;
   try {
     if (!rec.note) {
-      show("busy", "정리본을 만드는 중이에요 · 1~2분");
+      prepState[d.day] = { stage: "note", started: Date.now(), retried };
+      prepNotify(d.day);
       const res = await postJSON("/api/note", body);
       rec = updateDay(d.day, { note: res.note, noteSeconds: res.elapsed });
     }
     if (!rec.quiz) {
-      show("busy", "정리본 완성 · 퀴즈를 만드는 중이에요");
+      prepState[d.day] = { stage: "quiz", started: Date.now(), retried };
+      prepNotify(d.day);
       const res = await postJSON("/api/quiz", { ...body, sections: rec.note.map || [] });
       rec = updateDay(d.day, { quiz: res.quiz, quizSeconds: res.elapsed });
     }
-    show("ok", "정리본과 퀴즈가 준비됐어요");
+    delete prepState[d.day];
   } catch (e) {
-    show("bad", `${esc(e.message)} <button class="link" id="retry">다시 시도</button>`);
-    const r = document.getElementById("retry");
-    if (r) r.addEventListener("click", () => prepare(d));
-  } finally {
-    preparing[d.day] = false;
+    // 한 번은 1분 뒤 자동으로 다시 시도한다
+    const st = { stage: "error", error: e.message, retried, retryAt: retried ? null : Date.now() + AUTO_RETRY_SEC * 1000 };
+    prepState[d.day] = st;
+    if (!retried) setTimeout(() => { if (prepState[d.day] === st) { st.retried = true; prepare(d, true); } }, AUTO_RETRY_SEC * 1000);
   }
+  prepNotify(d.day);
+}
+
+// 기다리는 동안 할 수 있는 것
+function whileWaitingHTML() {
+  const today = ymd(new Date());
+  const due = reviewsDue(today);
+  const wrong = store.plan.reduce((a, p) => a + currentWrong(p.day).length, 0);
+  const rows = [];
+  if (due.length) rows.push(`<a class="row" href="#/review"><span>오늘 복습 퀴즈 풀기 · Day ${due.map((x) => x.day).join(", ")}</span><span aria-hidden="true">›</span></a>`);
+  if (wrong) rows.push(`<a class="row" href="#/history/wrong"><span>틀린 문제 ${wrong}개 다시 보기</span><span aria-hidden="true">›</span></a>`);
+  rows.push(`<a class="row" href="#/history"><span>지난 공부 보기</span><span aria-hidden="true">›</span></a>`);
+  return rows.join("");
+}
+
+// 정리본·퀴즈가 아직 없을 때: 만드는 중이면 단계와 시간, 실패했으면 오류와 다시 시도
+function renderPrepView(d, want) {
+  if (!prepState[d.day]) prepare(d);
+  const st = prepState[d.day] || { stage: "note", started: Date.now() };
+  const rec = dayRecord(d.day);
+  const what = want === "quiz" ? "퀴즈를" : "정리본을";
+
+  if (st.stage === "error") {
+    const busy = /붐|503|혼잡/.test(st.error);
+    app.innerHTML = `${navHeader("", true)}
+    <main class="wide two-col prep-view">
+      <section class="intro" role="alert">
+        <span class="step" style="color:var(--bad);font-weight:500">${what} 만들지 못했어요</span>
+        <h1 class="title hero">${busy ? "AI 서버가 지금 붐벼요" : "잠깐 문제가 생겼어요"}</h1>
+        <p class="lede">${busy ? "모델 3개에 차례로 시도했지만 모두 실패했어요." : esc(st.error)} 내 자료와 기록은 그대로예요.</p>
+        <p class="hint" id="retry-note">${st.retryAt ? "" : "자동 다시 시도도 실패했어요. 잠시 뒤 직접 다시 시도해 주세요."}</p>
+        <div class="actions"><button class="primary" id="retry-now">다시 시도</button><a href="#/today" style="font-size:15px">오늘로 돌아가기</a></div>
+      </section>
+      <div class="panel"><section class="section"><h2 class="label">그동안</h2>${whileWaitingHTML()}</section></div>
+    </main>`;
+    document.getElementById("retry-now").addEventListener("click", () => { prepare(d, true); route(); });
+    tickPrep(d.day);
+    return;
+  }
+
+  const step = (state, label, extra = "") => `<li class="pstep ${state}"><span class="pdot" aria-hidden="true">${state === "done" ? "✓" : ""}</span><span class="grow">${label}</span><span class="hint">${extra}</span></li>`;
+  const noteDone = !!rec.note;
+  app.innerHTML = `${navHeader("", true)}
+  <main class="wide two-col prep-view">
+    <section class="intro" aria-live="polite">
+      <span class="step">Day ${d.day} · ${esc(d.label)}</span>
+      <h1 class="title hero">${what} 만들고 있어요</h1>
+      <ol class="psteps">
+        ${step("done", "PDF 글자 읽기", `${d.count}쪽`)}
+        ${step(noteDone ? "done" : "now", noteDone ? "정리본 완성" : "AI가 정리본 쓰는 중", noteDone ? "" : `<span id="elapsed">0</span>초째`)}
+        ${step(noteDone ? "now" : "todo", noteDone ? "AI가 퀴즈 만드는 중" : "퀴즈 만들기", noteDone ? `<span id="elapsed">0</span>초째` : "")}
+      </ol>
+      <div class="progress indeterminate" role="progressbar" aria-label="만드는 중"><div></div></div>
+      <p class="hint">보통 10~20초 걸려요. 다른 화면으로 가도 계속 만들고, 다 되면 여기에 바로 보여 줘요.</p>
+    </section>
+    <div class="panel"><section class="section"><h2 class="label">기다리는 동안</h2>${whileWaitingHTML()}</section></div>
+  </main>`;
+  tickPrep(d.day);
+}
+
+// 걸린 시간·자동 다시 시도 남은 시간을 1초마다 갱신
+let prepTimer = null;
+function tickPrep(day) {
+  clearInterval(prepTimer);
+  const update = () => {
+    const st = prepState[day];
+    if (!st || !document.querySelector(".prep-view")) return clearInterval(prepTimer);
+    const el = document.getElementById("elapsed");
+    if (el && st.started) el.textContent = Math.floor((Date.now() - st.started) / 1000);
+    const rn = document.getElementById("retry-note");
+    if (rn && st.retryAt) rn.textContent = `${Math.max(0, Math.ceil((st.retryAt - Date.now()) / 1000))}초 뒤 자동으로 한 번 더 시도해요.`;
+  };
+  update();
+  prepTimer = setInterval(update, 1000);
 }
 
 // ---------- ④ 정리본 (필기 스타일) ----------
@@ -359,13 +458,7 @@ function renderNote(day, jump) {
   const note = rec.note;
   const multi = new Set(store.pages.slice(d.start - 1, d.end).map((p) => p.file)).size > 1;
 
-  if (!note) {
-    app.innerHTML = `${navHeader("")}
-    <main><div class="head"><span class="meta">Day ${d.day} · ${esc(d.label)}</span><h1 class="title">정리본을 아직 만들지 않았어요</h1>
-    <span class="hint">오늘 화면을 열면 자동으로 만들기 시작해요.</span></div>
-    <div class="actions"><a class="primary" href="#/today">오늘로 가서 만들기</a></div></main>`;
-    return;
-  }
+  if (!note) return renderPrepView(d, "note");
 
   const sections = arr(note.sections);
   const top = sections.flatMap((s) => arr(s.key_points).filter((k) => +k.importance >= 3).map((k) => k.text)).slice(0, 5);
@@ -468,13 +561,7 @@ function renderQuiz(day) {
   const multi = new Set(store.pages.slice(d.start - 1, d.end).map((p) => p.file)).size > 1;
   const sectionTitles = arr(rec.note && rec.note.sections).map((s) => s.title);
 
-  if (!qs.length) {
-    app.innerHTML = `${navHeader("")}
-    <main><div class="head"><span class="meta">Day ${d.day} · ${esc(d.label)}</span><h1 class="title">퀴즈를 아직 만들지 않았어요</h1>
-    <span class="hint">오늘 화면을 열면 정리본 다음에 자동으로 만들어요.</span></div>
-    <div class="actions"><a class="primary" href="#/today">오늘로 가서 만들기</a></div></main>`;
-    return;
-  }
+  if (!qs.length) return renderPrepView(d, "quiz");
 
   const answers = rec.answers || {};
   const graded = !!rec.graded;
@@ -1263,14 +1350,94 @@ function renderWrong(solving = false) {
   });
 }
 
+// Day 1부터 이어서 퀴즈를 푼 날까지 (중간에 빈 날이 있으면 그 뒤는 다시 나눌 대상)
+function studiedPrefix() {
+  const out = [];
+  for (const p of store.plan) { if (!dayRecord(p.day).quizDone) break; out.push(p); }
+  return out;
+}
+
+// 남은 범위를 오늘(오늘 이미 퀴즈를 풀었으면 내일)부터 시험일까지 다시 나눈다. 퀴즈를 푼 Day 기록은 그대로
+async function replanRemaining(exam) {
+  store = load();
+  const today = ymd(new Date());
+  const studied = studiedPrefix();
+  const lastStudied = studied.length ? studied[studied.length - 1].end : 0;
+  const rest = store.pages.slice(lastStudied);
+  if (!rest.length) throw new Error("남은 범위가 없어요.");
+  const doneToday = studied.some((p) => dayRecord(p.day).gradedAt === today);
+  const start = doneToday ? addDays(today, 1) : today;
+  const res = await postJSON("/api/plan", { pages: rest.map(({ file, page }) => ({ file, page })), start_date: start, exam_date: exam });
+  const newDays = res.days.map((d, i) => ({ ...d, day: studied.length + i + 1, start: d.start + lastStudied, end: d.end + lastStudied }));
+  store = load();
+  const days = {};
+  for (const p of studied) days[p.day] = store.days[p.day];
+  store.plan = [...studied, ...newDays];
+  store.examDate = exam;
+  store.finalDate = res.final_date || null;
+  store.days = days;
+  delete store.missedDismissed;
+  save(store);
+  return { pages: rest.length, days: newDays.length, perDay: Math.round(rest.length / newDays.length), finalDate: store.finalDate };
+}
+
+// ---------- 밀린 날 (#22) ----------
+// 오늘보다 앞선 날인데 퀴즈를 안 푼 Day
+function missedDays(today) {
+  return store.plan.filter((p) => p.date < today && !dayRecord(p.day).quizDone);
+}
+
+function missedBannerHTML(today) {
+  const missed = missedDays(today);
+  if (!missed.length || store.missedDismissed === today) return "";
+  // 다시 나누면 하루 분량이 얼마나 되는지 미리 보여 준다
+  const studied = studiedPrefix();
+  const lastStudied = studied.length ? studied[studied.length - 1].end : 0;
+  const rest = store.pages.length - lastStudied;
+  const span = Math.max(1, diffDays(today, store.examDate) - (store.finalDate !== null && diffDays(today, store.examDate) >= 2 ? 1 : 0));
+  const after = Math.ceil(rest / Math.min(span, rest || 1));
+  const futureDays = store.plan.filter((p) => p.date >= today);
+  const before = futureDays.length ? Math.round(futureDays.reduce((a, p) => a + p.count, 0) / futureDays.length) : after;
+  const names = missed.map((p) => `Day ${p.day}`).join(", ");
+  const head = missed.length === 1 ? `${missed[0].date === addDays(today, -1) ? "어제" : md(missed[0].date)}(Day ${missed[0].day}) 범위가 밀렸어요` : `${missed.length}일 치 범위가 밀렸어요 (${names})`;
+  return `<section class="notice missed" role="status">
+    <b>${head}</b>
+    <span>괜찮아요. 남은 ${rest}쪽을 오늘부터 시험 전까지 다시 나누면 하루 분량이 약 ${before}쪽 → ${after}쪽이 돼요.</span>
+    <div class="missed-actions">
+      <button class="link" id="replan-missed" style="font-weight:700">남은 날로 다시 나누기</button>
+      <button class="link muted" id="keep-missed">그대로 두고 밀린 것부터 할게요</button>
+    </div>
+    <span id="missed-msg" class="status"></span>
+  </section>`;
+}
+
+function bindMissedBanner(today) {
+  const go1 = document.getElementById("replan-missed");
+  if (!go1) return;
+  go1.addEventListener("click", async () => {
+    const msg = document.getElementById("missed-msg");
+    msg.innerHTML = `<span class="dot busy"></span>다시 나누는 중…`;
+    try {
+      await replanRemaining(store.examDate);
+      route();
+    } catch (e) {
+      msg.innerHTML = `<span class="dot bad"></span>${esc(e.message)}`;
+    }
+  });
+  document.getElementById("keep-missed").addEventListener("click", () => {
+    store = load(); store.missedDismissed = today; save(store);
+    // 밀린 Day 중 첫 번째로 이동
+    const first = missedDays(today)[0];
+    location.hash = `#/note/${first.day}`;
+  });
+}
+
 // ---------- ⑨ 설정 (#19) ----------
 function renderSettings() {
   if (!store.plan) return redirect(store.pages ? "#/plan" : "#/upload");
   const today = ymd(new Date());
   const style = store.style || "hand";
-  // 다시 나눌 때 남기는 Day: Day 1부터 이어서 퀴즈를 푼 날까지 (중간에 빈 날이 있으면 그 뒤는 다시 나눔)
-  const studied = [];
-  for (const p of store.plan) { if (!dayRecord(p.day).quizDone) break; studied.push(p); }
+  const studied = studiedPrefix();
   const lastStudied = studied.length ? studied[studied.length - 1].end : 0;
   const left = store.pages.length - lastStudied;
   const files = arr(store.files);
@@ -1329,25 +1496,10 @@ function renderSettings() {
     const exam = document.getElementById("exam").value;
     const msg = document.getElementById("planmsg");
     if (!exam || exam <= today) { msg.innerHTML = `<span class="dot bad"></span>시험일은 내일 이후로 골라 주세요.`; return; }
-    // 오늘 이미 퀴즈를 풀었으면 내일부터 나눈다
-    const doneToday = studied.some((p) => dayRecord(p.day).gradedAt === today);
-    const start = doneToday ? addDays(today, 1) : today;
     msg.innerHTML = `<span class="dot busy"></span>다시 나누는 중…`;
     try {
-      const rest = store.pages.slice(lastStudied);
-      const res = await postJSON("/api/plan", { pages: rest.map(({ file, page }) => ({ file, page })), start_date: start, exam_date: exam });
-      const keep = studied.map((p) => p.day);
-      const newDays = res.days.map((d, i) => ({ ...d, day: studied.length + i + 1, start: d.start + lastStudied, end: d.end + lastStudied }));
-      store = load();
-      const days = {};
-      // 퀴즈를 푼 Day 기록만 남긴다 (번호는 그대로)
-      for (const p of studied) days[p.day] = store.days[p.day];
-      store.plan = [...studied, ...newDays];
-      store.examDate = exam;
-      store.finalDate = res.final_date || null;
-      store.days = days;
-      save(store);
-      msg.innerHTML = `<span class="dot ok"></span>남은 ${rest.length}쪽을 ${newDays.length}일로 다시 나눴어요 (하루 약 ${Math.round(rest.length / newDays.length)}쪽)${store.finalDate ? ` · 총정리 ${md(store.finalDate)}` : ""}. <a href="#/history">계획 보기</a>`;
+      const r = await replanRemaining(exam);
+      msg.innerHTML = `<span class="dot ok"></span>남은 ${r.pages}쪽을 ${r.days}일로 다시 나눴어요 (하루 약 ${r.perDay}쪽)${r.finalDate ? ` · 총정리 ${md(r.finalDate)}` : ""}. <a href="#/history">계획 보기</a>`;
     } catch (e) {
       msg.innerHTML = `<span class="dot bad"></span>${esc(e.message)}`;
     }
