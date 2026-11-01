@@ -183,7 +183,7 @@ function renderPlan() {
             <div class="card-text">
               <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="clean" ${style === "clean" ? "checked" : ""}><b>깔끔 스타일</b></span>
               <ul><li>개념마다 "왜 → 그래서" 카드</li><li>단서 · 비교는 표로 정리</li><li>분류는 색으로 구분</li></ul>
-              <small>처음 배울 때 차근차근 읽기 좋아요</small>
+              <small>처음 배울 때 차근차근 읽기 좋아요 · <b>준비 중</b> (그 전까지는 필기 스타일로 보여요)</small>
             </div>
           </label>
         </div>
@@ -1138,6 +1138,264 @@ function renderFinalQuiz() {
   renderSessionQuiz(FINAL_MODE);
 }
 
+// ---------- ⑧ 지난 공부 (#19) ----------
+// 지금 틀린 상태인 문제: 복습했으면 마지막 복습 결과, 아니면 처음 퀴즈 결과
+function currentWrong(day) {
+  const r = dayRecord(day);
+  return arr(r.reviewWrong ?? r.wrong);
+}
+
+function renderHistory() {
+  if (!store.plan) return redirect("#/upload");
+  const today = ymd(new Date());
+  const studied = store.plan.filter((p) => dayRecord(p.day).quizDone);
+  const scores = studied.map((p) => dayRecord(p.day)).filter((r) => r.score !== undefined && r.quiz);
+  const avg = scores.length ? Math.round((scores.reduce((a, r) => a + r.score / arr(r.quiz.questions).length, 0) / scores.length) * 100) : null;
+  const wrongTotal = store.plan.reduce((a, p) => a + currentWrong(p.day).length, 0);
+
+  const dayRow = (p) => {
+    const r = dayRecord(p.day);
+    const n = arr(r.quiz && r.quiz.questions).length;
+    const sched = reviewSchedule(p.day);
+    const status = !r.note ? "아직 안 함" : !r.quizDone ? "정리본만 봄" : `퀴즈 ${r.score ?? "-"}/${n}`;
+    const chips = sched ? sched.map((c) => {
+      if (c.state === "done") return `<span class="chip-s done" title="${c.gap}일 차 복습 ${md(c.date)}">${c.gap}일 ✓</span>`;
+      if (c.state === "after") return `<span class="chip-s after">${c.gap}일 -</span>`;
+      return `<span class="chip-s ${c.date < today ? "late" : ""}">${c.gap}일 ${md(c.date)}</span>`;
+    }).join("") : "";
+    const wrong = currentWrong(p.day).length;
+    return `<li class="hist-row ${r.quizDone ? "" : "muted-row"}">
+      <div class="hist-main">
+        <span class="hint">Day ${p.day} · ${md(p.date)}${p.date === today ? " · 오늘" : ""}</span>
+        <b>${esc(p.label)}</b>
+        ${chips ? `<span class="chips-s">${chips}</span>` : ""}
+      </div>
+      <div class="hist-side">
+        <span class="${r.quizDone ? "" : "hint"}">${status}${wrong ? ` · <span style="color:var(--bad)">틀린 ${wrong}</span>` : ""}</span>
+        <span class="hist-links">${r.note ? `<a href="#/note/${p.day}">정리본</a>` : ""}${r.quiz ? `<a href="#/quiz/${p.day}">퀴즈 기록</a>` : ""}</span>
+      </div>
+    </li>`;
+  };
+  const finalRow = store.finalDate ? `<li class="hist-row muted-row"><div class="hist-main"><span class="hint">총정리 · ${md(store.finalDate)}</span><b>시험 전날 총정리</b></div>
+    <div class="hist-side"><span class="hint">${store.finalSession && store.finalSession.graded ? "총정리 퀴즈 완료" : "예정"}</span><span class="hist-links"><a href="#/final/summary">요약본</a></span></div></li>` : "";
+
+  app.innerHTML = `${navHeader("history", true)}
+  <main class="wide">
+    <div class="review-grid">
+      <aside class="review-side">
+        <span class="step">지난 공부</span>
+        <h1 class="title">${store.plan.length}일 중<br>${studied.length}일 공부했어요</h1>
+        <div class="progress" role="progressbar" aria-label="공부한 날" aria-valuemin="0" aria-valuemax="${store.plan.length}" aria-valuenow="${studied.length}"><div style="width:${(studied.length / store.plan.length) * 100}%"></div></div>
+        <dl class="stats">
+          <div><dt>퀴즈 평균</dt><dd>${avg === null ? "-" : `${avg}점`}</dd></div>
+          <div><dt>지금 틀린 문제</dt><dd>${wrongTotal}개</dd></div>
+          <div><dt>시험</dt><dd>${korDate(store.examDate)} · D-${Math.max(0, diffDays(today, store.examDate))}</dd></div>
+        </dl>
+        <div class="actions">
+          ${wrongTotal ? `<a class="primary wide" href="#/history/wrong">틀린 문제 모아 보기</a>` : `<a class="primary wide" href="#/today">오늘로</a>`}
+        </div>
+        <p class="hint" style="margin:0">복습에서 맞힌 문제는 "틀린 문제"에서 빠져요.</p>
+      </aside>
+      <div>
+        <ul class="hist-list">${store.plan.map(dayRow).join("")}${finalRow}</ul>
+      </div>
+    </div>
+  </main>`;
+}
+
+// 틀린 문제 모아 보기: 지금 틀린 상태인 문제 전부. 다시 풀어서 맞히면 목록에서 빠진다
+const WRONG_MODE = {
+  key: "wrongSession",
+  step: "틀린 문제 다시 풀기",
+  title: "틀린 문제만<br>다시 풀어 봐요",
+  note: "보기 순서는 처음과 달라요. 맞힌 문제는 틀린 문제 목록에서 빠져요.",
+  groupSub: () => "",
+  afterHint: (score, total) => (score === total ? "전부 맞혔어요! 틀린 문제 목록이 비었어요" : `아직 틀린 ${total - score}문제는 목록에 남아요`),
+  onGradeDay: (day, mine, wrongNow) => {
+    const done = new Set(mine.map((x) => x.it.qi).filter((qi) => !wrongNow.includes(qi)));
+    updateDay(day, { reviewWrong: currentWrong(day).filter((qi) => !done.has(qi)) });
+  },
+  rerender: () => renderWrong(true),
+};
+
+function renderWrong(solving = false) {
+  if (!store.plan) return redirect("#/upload");
+  const today = ymd(new Date());
+  if (solving && store.wrongSession) return renderSessionQuiz(WRONG_MODE);
+  const list = store.plan.flatMap((p) => {
+    const qs = arr(dayRecord(p.day).quiz && dayRecord(p.day).quiz.questions);
+    return currentWrong(p.day).filter((qi) => qs[qi]).map((qi) => ({ day: p.day, qi, q: qs[qi] }));
+  });
+  if (!list.length) {
+    app.innerHTML = `${navHeader("history", true)}<main class="wide"><div class="head"><h1 class="title hero">틀린 문제가 없어요</h1>
+      <span class="hint">퀴즈와 복습에서 틀린 문제가 여기 모여요.</span></div><div class="actions"><a class="primary" href="#/history">지난 공부로</a></div></main>`;
+    return;
+  }
+  const item = ({ day, q }) => {
+    const f = findSection(day, q.section);
+    const ans = q.type === "choice" ? arr(q.options)[+q.answer_index - 1] ?? q.answer_text : q.answer_text;
+    return `<article class="q">
+      <span class="meta">Day ${day}${q.section ? ` · ${esc(q.section)}` : ""}</span>
+      <h2>${esc(q.question)}</h2>
+      ${q.code ? `<pre class="code">${esc(q.code)}</pre>` : ""}
+      <div class="explain-box"><span class="explain-label">정답</span><p class="explain"><b>${esc(ans)}</b></p>
+        ${q.explanation ? `<p class="explain">${esc(q.explanation)}</p>` : ""}
+        <div class="explain-foot"><a class="see-note" href="#/note/${day}${f ? `/s${f.k}` : ""}">정리본에서 다시 보기 →</a></div></div>
+    </article>`;
+  };
+  app.innerHTML = `${navHeader("history", true)}
+  <main class="wide">
+    <div class="review-grid">
+      <aside class="review-side">
+        <a href="#/history" style="font-size:14px">← 지난 공부</a>
+        <h1 class="title">틀린 문제<br>${list.length}개</h1>
+        <p class="hint" style="margin:0">정답과 해설을 먼저 읽고, 다시 풀어서 맞히면 목록에서 빠져요.</p>
+        <div class="actions"><button class="primary wide" id="solve">다시 풀기</button></div>
+      </aside>
+      <div class="review-qs">${list.map(item).join("")}</div>
+    </div>
+  </main>`;
+  document.getElementById("solve").addEventListener("click", () => {
+    const items = list.slice(0, 20).map((x) => ({ day: x.day, qi: x.qi, q: shuffledCopy(x.q) }));
+    store = load(); store.wrongSession = { date: today, items, answers: {}, graded: false }; save(store);
+    renderWrong(true);
+    window.scrollTo(0, 0);
+  });
+}
+
+// ---------- ⑨ 설정 (#19) ----------
+function renderSettings() {
+  if (!store.plan) return redirect(store.pages ? "#/plan" : "#/upload");
+  const today = ymd(new Date());
+  const style = store.style || "hand";
+  // 다시 나눌 때 남기는 Day: Day 1부터 이어서 퀴즈를 푼 날까지 (중간에 빈 날이 있으면 그 뒤는 다시 나눔)
+  const studied = [];
+  for (const p of store.plan) { if (!dayRecord(p.day).quizDone) break; studied.push(p); }
+  const lastStudied = studied.length ? studied[studied.length - 1].end : 0;
+  const left = store.pages.length - lastStudied;
+  const files = arr(store.files);
+
+  app.innerHTML = `${navHeader("", true)}
+  <main class="wide">
+    <div class="review-grid">
+      <aside class="review-side">
+        <h1 class="title">설정</h1>
+        <p class="hint" style="margin:0">기록은 로그인 없이 이 브라우저에만 저장돼요. 다른 기기에서 이어 하려면 기록 파일로 내보내 가져오세요.</p>
+      </aside>
+      <div class="settings">
+        <section>
+          <h2>정리본 스타일</h2>
+          <label class="set-row"><input type="radio" name="st" value="hand" ${style === "hand" ? "checked" : ""}>
+            <span><b>필기 스타일</b><span class="hint">밑줄 + 형광펜은 시험에 나올 내용, 빨간 손글씨는 왜 중요한지</span></span></label>
+          <label class="set-row ${style === "clean" ? "" : "disabled"}"><input type="radio" name="st" value="clean" ${style === "clean" ? "checked" : "disabled"}>
+            <span><b>깔끔 스타일 <span class="soon">준비 중</span></b><span class="hint">"왜 → 그래서" 카드, 표, 색 구분${style === "clean" ? " · 준비되기 전까지는 필기 스타일로 보여요" : ""}</span></span></label>
+        </section>
+
+        <section>
+          <h2>시험일 · 남은 범위</h2>
+          <p class="hint">이미 퀴즈를 푼 ${studied.length}일은 그대로 두고, 남은 ${left}쪽을 오늘부터 새 시험일까지 다시 나눠요. 하루를 건너뛰었을 때도 이걸로 다시 맞추면 돼요.</p>
+          <div class="set-inline">
+            <label>시험일<input type="date" id="exam" value="${store.examDate}" min="${addDays(today, 1)}"></label>
+            <button class="secondary" id="replan" ${left ? "" : "disabled"}>남은 범위 다시 나누기</button>
+          </div>
+          <p id="planmsg" class="status" aria-live="polite"></p>
+        </section>
+
+        <section>
+          <h2>강의 자료</h2>
+          <ul class="rows" style="border-top:0">${files.map((f) => `<li><span class="grow">${esc(f.name)}</span><span class="hint">${f.pages}쪽</span></li>`).join("")}</ul>
+          <p class="hint">자료를 바꾸면 계획과 기록이 처음부터 다시 시작돼요. 지금 기록이 필요하면 먼저 내보내 두세요.</p>
+          <button class="link" id="newfiles" data-step="0">새 자료로 다시 시작</button>
+        </section>
+
+        <section>
+          <h2>내 기록</h2>
+          <div class="set-inline">
+            <button class="secondary" id="export">기록 파일로 내보내기</button>
+            <label class="secondary file-btn">기록 파일 가져오기<input type="file" id="import" accept="application/json,.json"></label>
+          </div>
+          <p id="datamsg" class="status" aria-live="polite"></p>
+          <button class="link danger" id="wipe" data-step="0">모든 기록 지우기</button>
+        </section>
+      </div>
+    </div>
+  </main>`;
+
+  app.querySelectorAll('input[name="st"]').forEach((r) => r.addEventListener("change", () => {
+    store = load(); store.style = r.value; save(store);
+  }));
+
+  document.getElementById("replan").addEventListener("click", async () => {
+    const exam = document.getElementById("exam").value;
+    const msg = document.getElementById("planmsg");
+    if (!exam || exam <= today) { msg.innerHTML = `<span class="dot bad"></span>시험일은 내일 이후로 골라 주세요.`; return; }
+    // 오늘 이미 퀴즈를 풀었으면 내일부터 나눈다
+    const doneToday = studied.some((p) => dayRecord(p.day).gradedAt === today);
+    const start = doneToday ? addDays(today, 1) : today;
+    msg.innerHTML = `<span class="dot busy"></span>다시 나누는 중…`;
+    try {
+      const rest = store.pages.slice(lastStudied);
+      const res = await postJSON("/api/plan", { pages: rest.map(({ file, page }) => ({ file, page })), start_date: start, exam_date: exam });
+      const keep = studied.map((p) => p.day);
+      const newDays = res.days.map((d, i) => ({ ...d, day: studied.length + i + 1, start: d.start + lastStudied, end: d.end + lastStudied }));
+      store = load();
+      const days = {};
+      // 퀴즈를 푼 Day 기록만 남긴다 (번호는 그대로)
+      for (const p of studied) days[p.day] = store.days[p.day];
+      store.plan = [...studied, ...newDays];
+      store.examDate = exam;
+      store.finalDate = res.final_date || null;
+      store.days = days;
+      save(store);
+      msg.innerHTML = `<span class="dot ok"></span>남은 ${rest.length}쪽을 ${newDays.length}일로 다시 나눴어요 (하루 약 ${Math.round(rest.length / newDays.length)}쪽)${store.finalDate ? ` · 총정리 ${md(store.finalDate)}` : ""}. <a href="#/history">계획 보기</a>`;
+    } catch (e) {
+      msg.innerHTML = `<span class="dot bad"></span>${esc(e.message)}`;
+    }
+  });
+
+  // 실수로 누르지 않게 두 번 눌러야 실행 (브라우저 확인창은 쓰지 않는다)
+  const twoStep = (id, warn, run) => {
+    const b = document.getElementById(id);
+    b.addEventListener("click", () => {
+      if (b.dataset.step !== "1") { b.dataset.step = "1"; b.textContent = warn; return; }
+      run();
+    });
+  };
+  twoStep("newfiles", "정말 새로 시작할까요? 한 번 더 누르면 지금 기록이 지워져요", () => {
+    try { localStorage.removeItem(STORE_KEY); } catch {}
+    chosenFiles = []; uploaded = null;
+    go("#/upload");
+  });
+  twoStep("wipe", "정말 지울까요? 한 번 더 누르면 모든 기록이 지워지고 되돌릴 수 없어요", () => {
+    try { localStorage.removeItem(STORE_KEY); } catch {}
+    chosenFiles = []; uploaded = null;
+    go("#/upload");
+  });
+
+  document.getElementById("export").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(load(), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `study-buddy-backup-${today}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    document.getElementById("datamsg").innerHTML = `<span class="dot ok"></span>내려받았어요. 다른 브라우저에서 "기록 파일 가져오기"로 불러올 수 있어요.`;
+  });
+  document.getElementById("import").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    const msg = document.getElementById("datamsg");
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || !Array.isArray(data.pages) || !Array.isArray(data.plan)) throw new Error();
+      save(data); store = load();
+      msg.innerHTML = `<span class="dot ok"></span>기록을 불러왔어요. <a href="#/today">오늘로</a>`;
+    } catch {
+      msg.innerHTML = `<span class="dot bad"></span>study-buddy 기록 파일이 아니에요.`;
+    }
+  });
+}
+
 // ---------- 아직 만들지 않은 화면 ----------
 function renderSoon(name) {
   app.innerHTML = `${navHeader(name === "지난 공부" ? "history" : "")}
@@ -1161,8 +1419,8 @@ function route() {
   if (page === "quiz") return renderQuiz(arg);
   if (page === "review") return renderReview();
   if (page === "final") return arg === "quiz" ? renderFinalQuiz() : renderFinalSummary();
-  if (page === "history") return renderSoon("지난 공부");
-  if (page === "settings") return renderSoon("설정");
+  if (page === "history") return arg === "wrong" ? renderWrong(false) : renderHistory();
+  if (page === "settings") return renderSettings();
   redirect(store.plan ? "#/today" : "#/upload");
 }
 window.addEventListener("hashchange", route);
