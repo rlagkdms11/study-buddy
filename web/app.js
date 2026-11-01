@@ -278,23 +278,28 @@ function renderToday() {
   const done = Object.values(store.days).filter((r) => r.quizDone).length;
   const before = today < store.plan[0].date;
 
-  app.innerHTML = `${navHeader("today")}
-  <main>
+  // 오른쪽: 오늘 복습이 있으면 복습 목록, 없으면 복습 일정표
+  const side = reviewsDue(today).length ? reviewSectionHTML(today) : scheduleHTML(today);
+  app.innerHTML = `${navHeader("today", true)}
+  <main class="wide today-main">
     ${missedBannerHTML(today)}
-    <section class="section" style="gap:24px">
-      <div class="head" style="gap:10px">
-        <span class="meta">${korDate(today)} · Day ${d.day} / ${store.plan.length} · <b style="color:var(--accent)">D-${dday}</b></span>
-        <h1 class="title big">${esc(d.label).replace(", ", ",<br>")}</h1>
-        ${before ? `<span class="hint">${korDate(d.date)}부터 시작하는 범위예요</span>` : ""}
-      </div>
-      <div class="progress" role="progressbar" aria-label="학습 진행" aria-valuemin="0" aria-valuemax="${store.plan.length}" aria-valuenow="${done}"><div style="width:${(done / store.plan.length) * 100}%"></div></div>
-      <div class="actions">
-        <a class="primary" href="#/note/${d.day}">정리본 보기</a>
-        <a href="#/quiz/${d.day}" style="font-size:16px;font-weight:500">퀴즈 풀기</a>
-      </div>
-      <div id="prep" class="status" aria-live="polite" data-day="${d.day}"></div>
-    </section>
-    ${reviewSectionHTML(today)}
+    <div class="two-col">
+      <section class="intro" style="gap:24px">
+        <div class="head" style="gap:10px">
+          <span class="meta">${korDate(today)} · Day ${d.day} / ${store.plan.length} · <b style="color:var(--accent)">D-${dday}</b></span>
+          <h1 class="title hero">${esc(d.label).replace(", ", ",<br>")}</h1>
+          ${before ? `<span class="hint">${korDate(d.date)}부터 시작하는 범위예요</span>` : ""}
+        </div>
+        <div class="progress" role="progressbar" aria-label="학습 진행" aria-valuemin="0" aria-valuemax="${store.plan.length}" aria-valuenow="${done}"><div style="width:${(done / store.plan.length) * 100}%"></div></div>
+        <span class="hint" style="margin-top:-12px">${store.plan.length}일 중 ${done}일 완료${store.finalDate ? ` · 총정리 ${md(store.finalDate)}` : ""}</span>
+        <div class="actions">
+          <a class="primary" href="#/note/${d.day}">정리본 보기</a>
+          <a href="#/quiz/${d.day}" style="font-size:16px;font-weight:500">퀴즈 풀기</a>
+        </div>
+        <div id="prep" class="status" aria-live="polite" data-day="${d.day}"></div>
+      </section>
+      <div class="panel today-side">${side}</div>
+    </div>
   </main>`;
 
   bindMissedBanner(today);

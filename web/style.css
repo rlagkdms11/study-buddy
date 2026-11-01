@@ -222,6 +222,11 @@ b.ok { color: var(--ok); } b.bad { color: var(--bad); }
 @media (max-width: 520px) { .hist-row { flex-direction: column; gap: 8px; } .hist-side { align-items: flex-start; } }
 
 /* ---------- 로딩 · 오류 · 밀린 날 (#22) ---------- */
+.today-main { gap: 48px; }
+.today-main .notice.missed { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 20px 24px; }
+.today-main .notice.missed b { font-size: 17px; flex-basis: 100%; }
+.today-main .notice.missed > span:not(.status) { flex: 1 1 420px; }
+.today-side .section.ruled { border-top: 0; padding-top: 0; }
 .psteps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; font-size: 16px; }
 .pstep { display: flex; align-items: center; gap: 12px; }
 .pstep .pdot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #d9dde3; display: flex; align-items: center; justify-content: center; font-size: 12px; flex: none; }
