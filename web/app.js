@@ -183,7 +183,7 @@ function renderPlan() {
             <div class="card-text">
               <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="clean" ${style === "clean" ? "checked" : ""}><b>깔끔 스타일</b></span>
               <ul><li>개념마다 "왜 → 그래서" 카드</li><li>단서 · 비교는 표로 정리</li><li>분류는 색으로 구분</li></ul>
-              <small>처음 배울 때 차근차근 읽기 좋아요 · <b>준비 중</b> (그 전까지는 필기 스타일로 보여요)</small>
+              <small>처음 배울 때 차근차근 읽기 좋아요</small>
             </div>
           </label>
         </div>
@@ -486,7 +486,8 @@ function renderNote(day, jump) {
     </section>`;
   };
 
-  app.innerHTML = `<div class="note-page"><div class="note-wrap">
+  if (store.style === "clean") app.innerHTML = noteCleanHTML(d, note, multi, sections, top, comps);
+  else app.innerHTML = `<div class="note-page"><div class="note-wrap">
     <div class="note-top">
       <span class="muted">Day ${d.day} · ${esc(d.label)}</span>
       <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="pill" href="#/quiz/${d.day}">퀴즈 풀기 ✎</a></span>
@@ -725,6 +726,61 @@ function renderQuiz(day) {
     renderQuiz(d.day);
     window.scrollTo(0, y);
   }));
+}
+
+// ---------- ④-2 정리본 (깔끔 스타일, #21) ----------
+// 필기 스타일과 같은 정리본 데이터를 참고서처럼: 단원 카드, "왜 → 그래서" 두 칸, 단서표, 함정, 서술형
+function noteCleanHTML(d, note, multi, sections, top, comps) {
+  const sec = (s, i) => {
+    const pts = arr(s.key_points), traps = arr(s.traps), clues = arr(s.clues);
+    const pr = pageRange(s.pages, multi);
+    return `<section class="c-card" id="s${i}">
+      <div class="c-head">
+        <h2><span class="c-num">${String(i + 1).padStart(2, "0")}</span>${esc(s.title)}${s.importance ? ` <span class="c-stars" aria-label="중요도 ${+s.importance}">${stars(s.importance)}</span>` : ""}</h2>
+        ${pr ? `<span class="c-page">${esc(pr)}</span>` : ""}
+      </div>
+      ${s.link ? `<p class="c-lead">${esc(s.link)}</p>` : ""}
+      ${s.why || s.so ? `<div class="c-whyso">
+        ${s.why ? `<div class="c-why"><b>왜 필요했나</b>${esc(s.why)}</div>` : ""}
+        ${s.so ? `<div class="c-so"><b>그래서</b>${esc(s.so)}</div>` : ""}
+      </div>` : ""}
+      ${pts.length ? `<ul class="c-points">${pts.map((k) => `<li class="${+k.importance >= 3 ? "k3" : ""}">${+k.importance >= 2 ? `<mark>${esc(k.text)}</mark>` : esc(k.text)}${+k.importance >= 3 ? ` <span class="c-stars">★★★</span>` : ""}</li>`).join("")}</ul>` : ""}
+      ${s.analogy ? `<p class="c-analogy"><span>비유</span>${esc(s.analogy)} (자료 밖 설명)</p>` : ""}
+      ${clues.length ? `<table class="c-table"><thead><tr><th>이런 문장이 보이면</th><th>답</th></tr></thead>
+        <tbody>${clues.map((c) => `<tr><td>${esc(c.clue)}</td><td class="c-ans">${esc(c.answer)}</td></tr>`).join("")}</tbody></table>` : ""}
+      ${traps.map((t) => `<p class="c-trap"><b>함정</b>${esc(t.text)}</p>`).join("")}
+      ${s.definition ? `<p class="c-def"><b>서술형 한 문장</b>${esc(s.definition)}</p>` : ""}
+      ${s.check && s.check.q ? `<div class="c-foot">
+        <button type="button" class="c-btn" data-check="${i}" aria-expanded="false">확인 질문 보기</button>
+        <div class="check-a" id="c${i}" hidden><b>Q.</b> ${esc(s.check.q)}<br><b style="color:var(--teal)">A.</b> ${esc(s.check.a)}</div>
+      </div>` : ""}
+    </section>`;
+  };
+  return `<div class="clean-page"><div class="clean-wrap">
+    <div class="note-top">
+      <span class="muted">Day ${d.day} · ${esc(d.label)}</span>
+      <span style="display:flex;gap:8px;align-items:center"><a href="#/today" style="padding:10px 6px">← 오늘로</a><a class="c-btn strong" href="#/quiz/${d.day}">퀴즈 풀기</a></span>
+    </div>
+    <header class="c-header">
+      <span class="c-eyebrow">Day ${d.day} · ${md(d.date)} · ${esc(d.label)}</span>
+      <h1>${esc(note.title || "정리 노트")}</h1>
+      <div class="c-legend"><span><span class="c-stars">★★★</span> 시험 1순위</span><span><mark>형광펜</mark> 꼭 외울 것</span><span>p.3 근거 쪽</span></div>
+    </header>
+    <section class="c-card">
+      <h2>한 장으로 보는 전체 지도</h2>
+      <div class="c-map">${sections.map((x, i) => `<a href="#s${i}" data-jump="s${i}" class="c-map-item"><span class="c-num">${String(i + 1).padStart(2, "0")}</span><b>${esc(x.title)}</b>${arr(x.key_points)[0] ? `<span>${esc(arr(x.key_points)[0].text)}</span>` : ""}</a>`).join("")}</div>
+    </section>
+    ${sections.map(sec).join("")}
+    ${top.length ? `<section class="c-card" id="top"><h2>시험 직전 TOP ${top.length}</h2><ol class="c-top">${top.map((t) => `<li>${esc(t)}</li>`).join("")}</ol></section>` : ""}
+    ${comps.length ? `<section class="c-card" id="cmp"><h2>헷갈리는 쌍</h2>
+      ${comps.map((c) => `<h3>${esc(c.title)}</h3><table class="c-table">
+        <thead><tr>${arr(c.header).map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+        <tbody>${arr(c.rows).map((r) => `<tr>${arr(r).map((v, k) => `<td class="${k === 0 ? "c-row-h" : ""}">${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table>`).join("")}</section>` : ""}
+    <section class="c-cta" aria-label="다음 단계">
+      <div><b>다 읽었으면 바로 확인해 볼까요?</b><span>오늘 범위 퀴즈 · 1~2분</span></div>
+      <a href="#/quiz/${d.day}">이 범위 퀴즈 풀기 →</a>
+    </section>
+  </div></div>`;
 }
 
 // ---------- ⑤ 망각곡선 복습 (#5) ----------
@@ -1454,8 +1510,9 @@ function renderSettings() {
           <h2>정리본 스타일</h2>
           <label class="set-row"><input type="radio" name="st" value="hand" ${style === "hand" ? "checked" : ""}>
             <span><b>필기 스타일</b><span class="hint">밑줄 + 형광펜은 시험에 나올 내용, 빨간 손글씨는 왜 중요한지</span></span></label>
-          <label class="set-row ${style === "clean" ? "" : "disabled"}"><input type="radio" name="st" value="clean" ${style === "clean" ? "checked" : "disabled"}>
-            <span><b>깔끔 스타일 <span class="soon">준비 중</span></b><span class="hint">"왜 → 그래서" 카드, 표, 색 구분${style === "clean" ? " · 준비되기 전까지는 필기 스타일로 보여요" : ""}</span></span></label>
+          <label class="set-row"><input type="radio" name="st" value="clean" ${style === "clean" ? "checked" : ""}>
+            <span><b>깔끔 스타일</b><span class="hint">정돈된 참고서처럼. "왜 → 그래서" 카드, 단서표, 형광펜 핵심</span></span></label>
+          <p id="stylemsg" class="status" aria-live="polite"></p>
         </section>
 
         <section>
@@ -1490,6 +1547,8 @@ function renderSettings() {
 
   app.querySelectorAll('input[name="st"]').forEach((r) => r.addEventListener("change", () => {
     store = load(); store.style = r.value; save(store);
+    const m = document.getElementById("stylemsg");
+    if (m) m.innerHTML = `<span class="dot ok"></span>바꿨어요. 정리본을 열면 ${r.value === "clean" ? "깔끔" : "필기"} 스타일로 보여요.`;
   }));
 
   document.getElementById("replan").addEventListener("click", async () => {
