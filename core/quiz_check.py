@@ -12,10 +12,18 @@ STOP = {"것", "수", "등", "때", "및", "위한", "대한", "통해", "모든
 OUTSIDE = ("PDF 외", "pdf 외", "자료 외", "범위 외", "강의 외", "없는 내용")
 
 
+# 강의에 글자로 안 나와도 정상인 오답: 접근 제어자·자바 키워드 ("public으로 설정한다" 등)
+KEYWORDS = {"public", "private", "protected", "default", "static", "final", "abstract", "interface", "class",
+            "extends", "implements", "new", "void", "this", "super", "package", "import", "return", "null"}
+
+
 def words(text: str) -> list[str]:
-    """문장에서 내용 단어만 뽑는다 (2글자 이상, 조사 뗀 형태)."""
+    """문장에서 내용 단어만 뽑는다.
+    한글·영어·숫자를 나눠 보고("public으로" → public), 숫자는 빼서 "20가지"처럼 숫자만 바꾼 오답은 정상으로 본다."""
     out = []
-    for w in re.findall(r"[가-힣A-Za-z0-9]+", text):
+    for w in re.findall(r"[가-힣]+|[A-Za-z]+|[0-9]+", text):
+        if w.isdigit():
+            continue
         for j in JOSA:
             if w.endswith(j) and len(w) - len(j) >= 2:
                 w = w[: -len(j)]
@@ -34,7 +42,7 @@ def grounding(option: str, source_compact: str) -> float:
     ws = words(option)
     if not ws:
         return 1.0
-    return sum(1 for w in ws if w in source_compact) / len(ws)
+    return sum(1 for w in ws if w in source_compact or w in KEYWORDS) / len(ws)
 
 
 def find_weak(quiz: dict, source: str) -> list[dict]:

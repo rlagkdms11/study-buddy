@@ -139,16 +139,20 @@ def main():
         shape = sum(sum(len(v) for v in r["shape"]["issues"].values()) for r in rs)
         sec = sum(r["sec"] for r in rs) / len(rs)
         print(f"{rng:<8}{version:<12}{', '.join(map(str, ws)):<22}{sum(ws) / len(ws):>6.1f}{max(ws):>6}{shape:>10}{sec:>6.0f}초")
-        s = summary.setdefault(version, {"weak": [], "shape": 0, "pos": [0, 0, 0, 0]})
+        s = summary.setdefault(version, {"weak": [], "shape": 0, "pos": [0, 0, 0, 0], "dropped": 0, "rewritten": 0})
         s["weak"] += ws
         s["shape"] += shape
         for r in rs:
             s["pos"] = [x + y for x, y in zip(s["pos"], r["shape"]["positions"])]
+            if r["check"]:
+                s["dropped"] += r["check"]["dropped"]
+                s["rewritten"] += r["check"]["rewritten"]
     print("-" * 72)
     for version, s in summary.items():
         n = len(s["weak"])
         zero = sum(1 for w in s["weak"] if w == 0)
-        print(f"전체 {version}: 퀴즈 {n}개 · 엉뚱한 오답 평균 {sum(s['weak']) / n:.1f}개 · 0개인 퀴즈 {zero}/{n} · 모양 실수 {s['shape']} · 정답 위치 1~4번 {s['pos']}")
+        print(f"전체 {version}: 퀴즈 {n}개 · 엉뚱한 오답 평균 {sum(s['weak']) / n:.1f}개 · 0개인 퀴즈 {zero}/{n} · 모양 실수 {s['shape']} · 정답 위치 1~4번 {s['pos']}"
+              + (f" · 바꾼 문제 {s['rewritten']} · 뺀 문제 {s['dropped']}" if version == "새+자동검사" else ""))
     print(f"\n퀴즈 원본: {out_dir}")
 
 
