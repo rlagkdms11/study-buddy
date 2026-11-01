@@ -115,3 +115,36 @@ def quiz_prompt(pdf_text: str, sections=()) -> str:
     if sections:
         hint = "\nsection 칸에는 다음 섹션 제목 중 하나를 그대로 써: " + ", ".join(sections) + "\n"
     return QUIZ_PROMPT + hint + "\n강의 PDF 내용:\n" + pdf_text
+
+
+EXPLAIN_PROMPT = """너는 대학생의 시험공부를 돕는 친절한 조교야.
+학생이 아래 단원을 "이해 안 돼요"라고 눌렀어. 강의 PDF 내용을 바탕으로 더 쉽게 다시 설명해 줘.
+
+규칙
+- 정리본을 그대로 반복하지 말고, 처음 듣는 사람도 알 수 있게 다른 말로 풀어.
+- 내용은 강의 PDF에 근거해. 비유만 자료 밖 내용이어도 돼.
+- 용어는 PDF에 쓰인 표기 그대로 써. 예를 들어 PDF가 "싱글턴"이면 "싱글톤"으로 바꾸지 마.
+- 학생이 틀린 문제가 있으면 왜 그 답이 아닌지도 짚어 줘.
+- 각 칸은 1~3문장으로 짧게. 한국어로 쓰고 마크다운 기호(**, # 등)는 쓰지 마.
+
+아래 JSON 형식으로만 답해. 해당 내용이 없으면 빈 문자열 ""로 둬.
+{
+  "easy": "쉽게 말하면",
+  "example": "강의에 나온 예나 구체적인 상황으로 보면",
+  "analogy": "일상 비유 (자료 밖)",
+  "confusion": "가장 헷갈리는 지점과 구분하는 법",
+  "point": "시험에서는 이것만 기억"
+}
+"""
+
+
+def explain_prompt(section: dict, pdf_text: str, question: str = "", answer: str = "", my_answer: str = "") -> str:
+    """'이해 안 돼요'를 누른 단원(과 틀린 문제)을 더 쉽게 설명해 달라는 프롬프트."""
+    import json
+    keep = {k: section.get(k) for k in ("title", "why", "so", "key_points", "traps", "definition") if section.get(k)}
+    extra = ""
+    if question:
+        extra = f"\n학생이 헷갈린 문제: {question}\n정답: {answer}\n학생의 답: {my_answer or '(모름)'}\n"
+    return (EXPLAIN_PROMPT + "\n단원 정리본:\n" + json.dumps(keep, ensure_ascii=False)
+            + extra + "\n강의 PDF 내용:\n" + pdf_text)
+
