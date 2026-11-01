@@ -48,9 +48,9 @@ const postJSON = (path, data) => api(path, { method: "POST", headers: { "Content
 
 const GEAR = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5c6370" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>`;
 
-function navHeader(current) {
+function navHeader(current, wide = false) {
   const tab = (href, name, key) => `<a href="${href}" ${current === key ? 'aria-current="page"' : ""}>${name}</a>`;
-  return `<header class="top"><div class="bar">
+  return `<header class="top"><div class="bar${wide ? " wide" : ""}">
     <span class="logo">study-buddy</span>
     <nav class="tabs" aria-label="메뉴">${tab("#/today", "오늘", "today")}${tab("#/history", "지난 공부", "history")}</nav>
     <a class="icon-btn" href="#/settings" aria-label="설정">${GEAR}</a>
@@ -288,6 +288,7 @@ function renderToday() {
       </div>
       <div id="prep" class="status" aria-live="polite"></div>
     </section>
+    ${reviewSectionHTML(today)}
   </main>`;
 
   prepare(d);
@@ -634,6 +635,268 @@ function renderQuiz(day) {
   }));
 }
 
+// ---------- ⑤ 망각곡선 복습 (#5) ----------
+// 퀴즈를 푼 날로부터 1일, 3일, 7일 뒤에 그날 문제를 다시 푼다.
+// 복습 퀴즈는 AI를 다시 부르지 않고, 저장해 둔 문제 중 틀린 문제 위주로 골라 만든다.
+const REVIEW_GAPS = [1, 3, 7];
+const REVIEW_PER_DAY = 6;   // 한 Day에서 가져올 최대 문제 수
+const REVIEW_MAX = 15;      // 한 번에 푸는 최대 문제 수
+
+// 그 Day의 다음 복습 단계와 날짜. 다 끝났거나 시험 뒤면 null
+function nextReview(day) {
+  const r = dayRecord(day);
+  if (!r.quizDone || !r.gradedAt || !r.quiz) return null;
+  const done = r.reviews || {};
+  for (let k = 0; k < REVIEW_GAPS.length; k++) {
+    if (done[k]) continue;
+    // 간격은 직전 복습을 한 날부터 센다. 복습이 밀려도 다음 복습이 한꺼번에 몰리지 않게
+    const base = k === 0 ? r.gradedAt : (done[k - 1] && done[k - 1].date) || r.gradedAt;
+    const due = addDays(base, REVIEW_GAPS[k] - (k ? REVIEW_GAPS[k - 1] : 0));
+    if (store.examDate && due > store.examDate) return null;  // 시험 뒤 복습은 안 잡는다
+    return { day: +day, stage: k, gap: REVIEW_GAPS[k], due };
+  }
+  return null;
+}
+
+function reviewsDue(today) {
+  return Object.keys(store.days || {}).map(nextReview).filter((x) => x && x.due <= today)
+    .sort((a, b) => a.due.localeCompare(b.due) || a.day - b.day);
+}
+
+function upcomingReview(today) {
+  return Object.keys(store.days || {}).map(nextReview).filter((x) => x && x.due > today)
+    .sort((a, b) => a.due.localeCompare(b.due))[0];
+}
+
+function planOf(day) { return store.plan.find((p) => p.day === +day); }
+
+// Day마다 1·3·7일 차 복습이 언제인지. 끝난 건 그 날짜, 아직이면 예정일(앞 복습을 제때 한다고 보고 계산)
+function reviewSchedule(day) {
+  const r = dayRecord(day);
+  if (!r.quizDone || !r.gradedAt) return null;
+  const done = r.reviews || {};
+  let base = r.gradedAt;
+  return REVIEW_GAPS.map((gap, k) => {
+    if (done[k]) { base = done[k].date; return { gap, state: "done", date: done[k].date, score: done[k] }; }
+    const due = addDays(base, gap - (k ? REVIEW_GAPS[k - 1] : 0));
+    base = due;
+    if (store.examDate && due > store.examDate) return { gap, state: "after", date: due };
+    return { gap, state: "todo", date: due };
+  });
+}
+
+function scheduleHTML(today) {
+  const days = store.plan.filter((p) => reviewSchedule(p.day));
+  if (!days.length) return `<section class="section"><h2 style="font-size:17px">복습 일정</h2>
+    <p class="hint" style="margin:0">아직 채점한 퀴즈가 없어요. 오늘 퀴즈를 풀면 여기에 일정이 생겨요.</p></section>`;
+  const cell = (c) => {
+    if (c.state === "done") return `<span class="sched done">✓ ${md(c.date)}<small>${c.score.score}/${c.score.total}</small></span>`;
+    if (c.state === "after") return `<span class="sched after">시험 뒤</span>`;
+    const cls = c.date < today ? "late" : c.date === today ? "now" : "";
+    return `<span class="sched ${cls}">${c.date === today ? "오늘" : md(c.date)}</span>`;
+  };
+  return `<section class="section">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="font-size:17px">복습 일정</h2><span class="hint">시험 ${korDate(store.examDate)}</span></div>
+    <table class="sched-table">
+      <thead><tr><th scope="col">공부한 날</th>${REVIEW_GAPS.map((g) => `<th scope="col">${g}일 차</th>`).join("")}</tr></thead>
+      <tbody>${days.map((p) => `<tr><th scope="row"><b>Day ${p.day}</b><span>${esc(p.label)}</span></th>${reviewSchedule(p.day).map((c) => `<td>${cell(c)}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table>
+  </section>`;
+}
+
+function reviewSectionHTML(today) {
+  const due = reviewsDue(today);
+  if (!due.length) {
+    const next = upcomingReview(today);
+    if (!next) return "";
+    return `<section class="section ruled"><h2 class="label">복습</h2>
+      <p class="hint" style="margin:6px 0 0">다음 복습은 ${korDate(next.due)} · Day ${next.day} ${next.gap}일 차예요</p></section>`;
+  }
+  const rows = due.map((r) => {
+    const rec = dayRecord(r.day);
+    const wrong = (rec.reviewWrong || rec.wrong || []).length;
+    const late = r.due < today ? ` · <span style="color:var(--bad)">${diffDays(r.due, today)}일 밀림</span>` : "";
+    return `<li><span class="grow">Day ${r.day} · ${esc(planOf(r.day).label)}</span>
+      <span class="hint">${r.gap}일 차${wrong ? ` · 틀린 문제 ${wrong}개` : ""}${late}</span></li>`;
+  }).join("");
+  return `<section class="section ruled">
+    <h2 class="label">오늘 복습</h2>
+    <ul class="rows" style="border-top:0">${rows}</ul>
+    <div class="actions" style="margin-top:12px"><a href="#/review" class="review-go">복습 퀴즈 풀기 →</a>
+    <span class="hint">잊어버릴 때쯤 다시 풀면 오래 기억해요</span></div>
+  </section>`;
+}
+
+// 복습 문제 고르기: 틀린 문제 전부 + 맞힌 문제 몇 개 (같은 날 여러 번 열어도 같은 문제)
+function pickReviewQuestions(due) {
+  const items = [];
+  for (const r of due) {
+    const rec = dayRecord(r.day);
+    const qs = arr(rec.quiz && rec.quiz.questions);
+    const wrong = (rec.reviewWrong || rec.wrong || []).filter((i) => qs[i]);
+    const others = qs.map((q, i) => i).filter((i) => !wrong.includes(i));
+    shuffleInPlace(others);
+    const take = [...wrong, ...others].slice(0, REVIEW_PER_DAY);
+    for (const qi of take) items.push({ day: r.day, stage: r.stage, qi, q: shuffledCopy(qs[qi]) });
+  }
+  return items.slice(0, REVIEW_MAX);
+}
+
+function shuffleInPlace(a) {
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// 보기 순서를 다시 섞은 복사본 (처음 풀 때 위치를 외워서 맞히지 않게)
+function shuffledCopy(q) {
+  const c = JSON.parse(JSON.stringify(q));
+  if (c.type !== "choice" || !Array.isArray(c.options)) return c;
+  const order = shuffleInPlace(c.options.map((_, i) => i));
+  const ai = +c.answer_index;
+  c.options = order.map((i) => q.options[i]);
+  c.answer_index = order.indexOf(ai - 1) + 1;
+  return c;
+}
+
+function loadSession(today) {
+  let sess = store.reviewSession;
+  if (sess && sess.date === today) return sess;
+  const due = reviewsDue(today);
+  if (!due.length) return null;
+  sess = { date: today, items: pickReviewQuestions(due), answers: {}, graded: false };
+  store = load(); store.reviewSession = sess; save(store);
+  return sess;
+}
+
+function saveSession(patch) {
+  store = load();
+  store.reviewSession = { ...store.reviewSession, ...patch };
+  save(store);
+  return store.reviewSession;
+}
+
+function renderReview() {
+  if (!store.plan) return redirect("#/upload");
+  const today = ymd(new Date());
+  const sess = loadSession(today);
+  if (!sess || !sess.items.length) {
+    const next = upcomingReview(today);
+    app.innerHTML = `${navHeader("", true)}
+    <main class="wide two-col">
+      <div class="intro">
+        <span class="step">복습</span>
+        <h1 class="title hero">오늘은 복습할 게 없어요</h1>
+        <p class="lede">${next ? `다음 복습은 <b>${korDate(next.due)}</b> · Day ${next.day} ${next.gap}일 차예요.` : "퀴즈를 채점하면 1일, 3일, 7일 뒤에 복습이 잡혀요."}</p>
+        <p class="hint">잊어버릴 때쯤 다시 풀수록 오래 기억해요. 복습 퀴즈는 틀렸던 문제 위주로 나와요.</p>
+        <div class="actions" style="margin-top:12px"><a class="primary" href="#/today">오늘로</a></div>
+      </div>
+      <div class="panel">${scheduleHTML(today)}</div>
+    </main>`;
+    return;
+  }
+
+  const { items, graded } = sess;
+  const answers = sess.answers || {};
+  const right = (n) => isCorrect(items[n].q, answers[n]);
+  const days = [...new Set(items.map((it) => it.day))];
+  const score = items.filter((_, n) => right(n)).length;
+
+  const qHTML = (it, n) => {
+    const q = it.q;
+    const d = planOf(it.day);
+    const multi = new Set(store.pages.slice(d.start - 1, d.end).map((p) => p.file)).size > 1;
+    const where = [`Day ${it.day}`, q.section, pageRange(q.pages, multi)].filter(Boolean).map(esc).join(" · ");
+    const opts = q.type === "short"
+      ? (graded
+        ? `<p class="short-result">내 답 <b class="${right(n) ? "ok" : "bad"}">${esc(answers[n] || "(안 씀)")}</b> · 정답 <b>${esc(q.answer_text)}</b></p>`
+        : `<input class="short" data-n="${n}" value="${esc(answers[n] || "")}" placeholder="답을 적어 주세요" aria-label="Q${n + 1} 답">`)
+      : `<ol class="opts" role="radiogroup" aria-label="Q${n + 1} 보기">${arr(q.options).map((o, k) => {
+        const v = k + 1, mine = +answers[n] === v, correct = +q.answer_index === v;
+        if (!graded) return `<li><label class="opt ${mine ? "picked" : ""}"><input type="radio" name="r${n}" value="${v}" ${mine ? "checked" : ""} data-n="${n}"><span class="n">${v}</span><span>${esc(o)}</span></label></li>`;
+        const cls = correct ? "ok" : mine ? "bad" : "";
+        return `<li class="opt done ${cls}"><span class="n">${v}</span><span class="grow">${esc(o)}</span>${correct ? '<span class="tag">정답</span>' : mine ? '<span class="tag">내 답</span>' : ""}</li>`;
+      }).join("")}</ol>`;
+    const k = arr(dayRecord(it.day).note && dayRecord(it.day).note.sections).map((x) => x.title).indexOf(q.section);
+    return `<article class="q ${graded ? (right(n) ? "is-ok" : "is-bad") : ""}">
+      <span class="meta">Q${n + 1} · ${where}${graded ? ` · <b class="${right(n) ? "ok" : "bad"}">${right(n) ? "맞음" : "틀림"}</b>` : ""}</span>
+      <h2>${esc(q.question)}</h2>
+      ${q.code ? `<pre class="code">${esc(q.code)}</pre>` : ""}
+      ${opts}
+      ${graded ? `<div class="explain-box">${q.explanation ? `<span class="explain-label">해설</span><p class="explain">${esc(q.explanation)}</p>` : ""}
+        <div class="explain-foot"><a class="see-note" href="#/note/${it.day}${k >= 0 ? `/s${k}` : ""}">정리본에서 다시 보기 →</a></div></div>` : ""}
+    </article>`;
+  };
+
+  const groups = days.map((d) => {
+    const mine = items.filter((it) => it.day === d);
+    return { day: d, gap: REVIEW_GAPS[mine[0].stage], n: mine.length, label: planOf(d).label };
+  });
+  app.innerHTML = `${navHeader("", true)}
+  <main class="wide">
+    <div class="review-grid">
+      <aside class="review-side">
+        <span class="step">복습 퀴즈</span>
+        ${graded
+          ? `<h1 class="title">${items.length}문제 중<br>${score}개 맞았어요</h1>
+             <span class="hint">${score === items.length ? "다 기억하고 있어요! 다음 복습 간격이 길어져요" : `틀린 ${items.length - score}문제는 다음 복습에 다시 나와요`}</span>`
+          : `<h1 class="title">잊기 전에<br>다시 풀어 봐요</h1>
+             <span class="hint" id="left"></span>
+             <div class="progress" role="progressbar" aria-label="푼 문제" aria-valuemin="0" aria-valuemax="${items.length}" id="bar"><div style="width:0%"></div></div>`}
+        <ul class="review-days">${groups.map((g) => `<li><b>Day ${g.day} · ${g.gap}일 차</b><span>${esc(g.label)} · ${g.n}문제</span></li>`).join("")}</ul>
+        <div class="actions">
+          ${graded ? `<a class="primary wide" href="#/today">오늘로 돌아가기</a>` : `<button class="primary wide" id="grade">채점하기</button>`}
+        </div>
+        <span id="qmsg" class="status" aria-live="polite"></span>
+        ${graded ? "" : `<p class="hint" style="margin:0">틀렸던 문제가 섞여 있어요. 보기 순서는 처음과 달라요.</p>`}
+      </aside>
+      <div class="review-qs">${items.map(qHTML).join("")}</div>
+    </div>
+  </main>`;
+
+  const countLeft = () => {
+    const el = document.getElementById("left");
+    if (!el) return;
+    const a = (store.reviewSession || {}).answers || {};
+    const left = items.filter((_, n) => a[n] === undefined || a[n] === "").length;
+    el.textContent = left ? `${items.length}문제 중 ${items.length - left}문제 풀었어요` : "다 풀었어요. 채점해 볼까요?";
+    const bar = document.querySelector("#bar div");
+    if (bar) bar.style.width = `${((items.length - left) / items.length) * 100}%`;
+  };
+  countLeft();
+  const setAnswer = (n, v) => { saveSession({ answers: { ...(store.reviewSession.answers || {}), [n]: v } }); countLeft(); };
+  app.querySelectorAll('input[type="radio"][data-n]').forEach((r) => r.addEventListener("change", () => {
+    r.closest(".opts").querySelectorAll(".opt").forEach((l) => l.classList.remove("picked"));
+    r.closest(".opt").classList.add("picked");
+    setAnswer(r.dataset.n, +r.value);
+  }));
+  app.querySelectorAll("input.short").forEach((t) => t.addEventListener("input", () => setAnswer(t.dataset.n, t.value.trim())));
+
+  const grade = document.getElementById("grade");
+  if (grade) grade.addEventListener("click", () => {
+    const a = store.reviewSession.answers || {};
+    const left = items.filter((_, n) => a[n] === undefined || a[n] === "").length;
+    if (left && grade.dataset.sure !== "1") {
+      document.getElementById("qmsg").textContent = `아직 ${left}문제를 안 풀었어요. 그대로 채점하려면 한 번 더 눌러 주세요.`;
+      grade.dataset.sure = "1";
+      return;
+    }
+    // Day마다 복습 결과를 남기고, 이번에 틀린 문제를 다음 복습의 "틀린 문제"로 쓴다
+    for (const day of days) {
+      const mine = items.map((it, n) => ({ it, n })).filter((x) => x.it.day === day);
+      const wrongNow = mine.filter((x) => !isCorrect(x.it.q, a[x.n])).map((x) => x.it.qi);
+      const rec = dayRecord(day);
+      const stage = mine[0].it.stage;
+      updateDay(day, {
+        reviews: { ...(rec.reviews || {}), [stage]: { date: today, score: mine.length - wrongNow.length, total: mine.length } },
+        reviewWrong: wrongNow,
+      });
+    }
+    saveSession({ graded: true });
+    renderReview();
+    window.scrollTo(0, 0);
+  });
+}
+
 // ---------- 아직 만들지 않은 화면 ----------
 function renderSoon(name) {
   app.innerHTML = `${navHeader(name === "지난 공부" ? "history" : "")}
@@ -655,6 +918,7 @@ function route() {
   if (page === "today") return renderToday();
   if (page === "note") return renderNote(arg, arg2);
   if (page === "quiz") return renderQuiz(arg);
+  if (page === "review") return renderReview();
   if (page === "history") return renderSoon("지난 공부");
   if (page === "settings") return renderSoon("설정");
   redirect(store.plan ? "#/today" : "#/upload");

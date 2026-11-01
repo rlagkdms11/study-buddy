@@ -144,6 +144,33 @@ b.ok { color: var(--ok); } b.bad { color: var(--bad); }
 @media (max-width: 520px) { .chips-right { margin-left: 0; } }
 .actions.ruled { border-top: 1px solid var(--line); padding-top: 28px; }
 
+/* ---------- 복습 ---------- */
+.review-go { font-size: 16px; font-weight: 700; }
+.review-grid { display: grid; grid-template-columns: 300px minmax(0, 680px); gap: 72px; align-items: start; }
+.review-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 16px; }
+.review-side .title { font-size: 32px; line-height: 1.3; }
+.review-days { list-style: none; margin: 4px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.review-days li { display: flex; flex-direction: column; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.review-days span { color: var(--muted); font-size: 13px; }
+.review-qs { display: flex; flex-direction: column; gap: 40px; }
+.review-qs .q:first-child { border-top: 0; padding-top: 0; }
+.sched-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sched-table th, .sched-table td { padding: 14px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+.sched-table thead th { font-size: 13px; color: var(--muted); font-weight: 500; }
+.sched-table tbody th { font-weight: 400; }
+.sched-table tbody th span { display: block; font-size: 13px; color: var(--muted); }
+.sched { display: inline-flex; flex-direction: column; font-size: 14px; color: var(--muted); }
+.sched small { font-size: 12px; color: var(--muted); font-weight: 400; }
+.sched.done { color: var(--ok); font-weight: 500; }
+.sched.now { color: var(--accent); font-weight: 700; }
+.sched.late { color: var(--bad); font-weight: 500; }
+.sched.after { color: #b0b5bd; }
+@media (max-width: 900px) {
+  .review-grid { grid-template-columns: 1fr; gap: 32px; }
+  .review-side { position: static; }
+  .review-qs .q:first-child { border-top: 1px solid var(--line); padding-top: 28px; }
+}
+
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
 .bar.wide { max-width: 1120px; padding: 0 40px; }
 main.wide { max-width: 1120px; padding: 80px 40px 112px; gap: 56px; }
