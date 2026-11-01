@@ -33,10 +33,11 @@ def get_api_key() -> str:
     return key
 
 
-def ask_ai(prompt: str, retries: int = 3, as_json: bool = False):
+def ask_ai(prompt: str, retries: int = 3, as_json: bool = False, models: list[str] | None = None):
     """AI에게 질문하고 답을 받는다.
     서버가 바쁘면(503) 기다렸다 재시도하고, 그래도 안 되면 다음 모델로 넘어간다.
     모델을 쓸 수 없으면(400, 404, 429 등) 재시도 없이 바로 다음 모델로 넘어간다.
+    models를 주면 그 모델만 차례로 쓴다 (모델 비교용).
     """
     client = genai.Client(api_key=get_api_key())
     config = types.GenerateContentConfig(
@@ -45,7 +46,7 @@ def ask_ai(prompt: str, retries: int = 3, as_json: bool = False):
         thinking_config=types.ThinkingConfig(thinking_level="low"),
     )
     last_error = None
-    for model in MODELS:
+    for model in models or MODELS:
         for attempt in range(retries):
             start = time.perf_counter()
             try:
