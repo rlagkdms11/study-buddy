@@ -1069,7 +1069,7 @@ function renderFinalSummary() {
     <header class="paper note-head">
       <div class="sub">시험 전날 총정리</div>
       <h1><span>한 장으로 보는 시험 범위</span></h1>
-      <p>Day ${store.plan.length}개 정리본에서 ★★ 이상 단원 ${total}개의 핵심과 함정만 모았어요. "틀린 적 있음"은 퀴즈나 복습에서 틀린 단원이에요.</p>
+      <p>정리본이 있는 Day ${days.filter((x) => x.note).length}개${days.some((x) => !x.note) ? ` (전체 ${store.plan.length}개 중)` : ""}에서 ★★ 이상 단원 ${total}개의 핵심과 함정만 모았어요. "틀린 적 있음"은 퀴즈나 복습에서 틀린 단원이에요.</p>
     </header>
     <nav class="note-chips" aria-label="Day 바로가기">
       ${store.plan.map((p) => `<a href="#d${p.day}" data-jump="d${p.day}">Day ${p.day}</a>`).join("")}
