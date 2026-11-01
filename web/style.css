@@ -171,6 +171,17 @@ b.ok { color: var(--ok); } b.bad { color: var(--bad); }
   .review-qs .q:first-child { border-top: 1px solid var(--line); padding-top: 28px; }
 }
 
+/* ---------- 다시 볼 개념 · 총정리 ---------- */
+.revisit { background: #fffbea; border: 1px solid #f3e3a1; border-radius: 14px; padding: 20px 22px; }
+.revisit h2 { font-size: 17px; margin-bottom: 2px; }
+.revisit-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.revisit-card { background: #fff; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.revisit-card ul { margin: 0; padding-left: 1.2em; line-height: 1.7; }
+.revisit-card p { margin: 0; }
+.revisit-card .trap { color: var(--bad); }
+.revisit-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.weak-tag { font-family: 'Noto Sans KR', sans-serif; font-size: 12px; font-weight: 700; color: #b42318; background: #fdeeec; border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: 3px; }
+
 /* ---------- 넓은 화면 (자료 올리기 · 학습 계획) ---------- */
 .bar.wide { max-width: 1120px; padding: 0 40px; }
 main.wide { max-width: 1120px; padding: 80px 40px 112px; gap: 56px; }
