@@ -183,7 +183,7 @@ function renderPlan() {
             <div class="card-text">
               <span style="display:flex;gap:8px;align-items:center"><input type="radio" name="style" value="clean" ${style === "clean" ? "checked" : ""}><b>깔끔 스타일</b></span>
               <ul><li>개념마다 "왜 → 그래서" 카드</li><li>단서 · 비교는 표로 정리</li><li>분류는 색으로 구분</li></ul>
-              <small>처음 배울 때 차근차근 읽기 좋아요</small>
+              <small>처음 배울 때 차근차근 읽기 좋아요 · <b>준비 중</b> (그 전까지는 필기 스타일로 보여요)</small>
             </div>
           </label>
         </div>
@@ -1287,8 +1287,8 @@ function renderSettings() {
           <h2>정리본 스타일</h2>
           <label class="set-row"><input type="radio" name="st" value="hand" ${style === "hand" ? "checked" : ""}>
             <span><b>필기 스타일</b><span class="hint">밑줄 + 형광펜은 시험에 나올 내용, 빨간 손글씨는 왜 중요한지</span></span></label>
-          <label class="set-row disabled"><input type="radio" name="st" value="clean" disabled>
-            <span><b>깔끔 스타일 <span class="soon">준비 중</span></b><span class="hint">"왜 → 그래서" 카드, 표, 색 구분</span></span></label>
+          <label class="set-row ${style === "clean" ? "" : "disabled"}"><input type="radio" name="st" value="clean" ${style === "clean" ? "checked" : "disabled"}>
+            <span><b>깔끔 스타일 <span class="soon">준비 중</span></b><span class="hint">"왜 → 그래서" 카드, 표, 색 구분${style === "clean" ? " · 준비되기 전까지는 필기 스타일로 보여요" : ""}</span></span></label>
         </section>
 
         <section>
